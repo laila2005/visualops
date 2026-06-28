@@ -654,6 +654,8 @@ export default function VisualOps() {
   const [speedError, setSpeedError] = useState(null);
   const [liveElapsed, setLiveElapsed] = useState(0);
   const timerRef = useRef(null);
+  // Processing history
+  const [processHistory, setProcessHistory] = useState([]);
 
   const [agentStates, setAgentStates] = useState({
     vision: "idle", research: "idle", risk: "idle", output: "idle",
@@ -763,6 +765,15 @@ export default function VisualOps() {
       setTokensPerSec(res.tokensPerSec);
       setTotalTokens(res.totalTokens);
       setTimeline(res.timeline);
+      // Add to processing history
+      setProcessHistory(prev => [...prev, {
+        id: Date.now(),
+        company: res.visionData?.company_name || file?.name || "Unknown",
+        elapsed: res.elapsed,
+        tokensPerSec: res.tokensPerSec,
+        totalTokens: res.totalTokens,
+        timestamp: new Date().toLocaleTimeString(),
+      }]);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -1241,6 +1252,32 @@ export default function VisualOps() {
                   </Card>
                 )}
 
+                {/* Agent Communication Log — proves Agent Collaboration */}
+                {visionData && researchData && riskData && (
+                  <Card style={{ background: "linear-gradient(135deg, #faf5ff, #f5f3ff)", border: "1px solid #e9d5ff" }}>
+                    <Section title="💬 Agent Communication Log — Inter-Agent Data Flow">
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {[
+                          { from: "👁 Vision", to: "🔍 Research", color: "#8b5cf6", data: `Sent: company="${visionData.company_name}", industry="${visionData.industry}", doc_type="${visionData.document_type}"` },
+                          { from: "👁 Vision", to: "⚠️ Risk", color: "#8b5cf6", data: `Sent: terms="${visionData.contract_duration || 'N/A'}", value="${visionData.deal_value || 'N/A'}", contacts=[${(visionData.key_contacts || []).length}]` },
+                          { from: "🔍 Research", to: "📋 Output", color: "#3b82f6", data: `Sent: profile, pain_points=[${(researchData.pain_points || []).length}], tech_stack, approach` },
+                          { from: "⚠️ Risk", to: "📋 Output", color: "#ef4444", data: `Sent: score=${riskData.risk_score_number || riskData.overall_score}/10, flags=[${(riskData.flags || []).length}], recommendation="${riskData.proceed_recommendation || 'N/A'}"` },
+                        ].map((msg, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,0.6)" }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: msg.color, whiteSpace: "nowrap" }}>{msg.from}</span>
+                            <span style={{ fontSize: 12, color: msg.color }}>→</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: msg.color, whiteSpace: "nowrap" }}>{msg.to}</span>
+                            <span style={{ fontSize: 10, color: "#6b7280", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "'Menlo', 'Monaco', 'Consolas', monospace" }}>{msg.data}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p style={{ margin: "8px 0 0", fontSize: 10, color: "#7c3aed", fontStyle: "italic" }}>
+                        Agents 2 (Research) + 3 (Risk) received Vision data simultaneously via Promise.all() — true parallel execution
+                      </p>
+                    </Section>
+                  </Card>
+                )}
+
               {/* Toolbar */}
               <div className="card-animate" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>✓ Onboarding package ready</p>
@@ -1348,10 +1385,20 @@ export default function VisualOps() {
                       {riskData.flags.map((f, i) => {
                         const sc = { low: "#fef9c3", medium: "#fffbeb", high: "#fef2f2" };
                         const tc = { low: "#854d0e", medium: "#92400e", high: "#991b1b" };
+                        const bc = { low: "#eab308", medium: "#f59e0b", high: "#ef4444" };
+                        const pct = { low: 33, medium: 66, high: 100 };
+                        const icons = { low: "⚡", medium: "⚠️", high: "🔴" };
                         return (
-                          <div key={i} style={{ padding: "8px 10px", borderRadius: 8, background: sc[f.severity] || sc.medium, marginBottom: 6 }}>
-                            <p style={{ margin: "0 0 2px", fontSize: 12, fontWeight: 600, color: tc[f.severity] || tc.medium }}>{f.severity?.toUpperCase()} · {f.issue}</p>
-                            <p style={{ margin: 0, fontSize: 11, color: "#6b7280" }}>{f.recommendation}</p>
+                          <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: sc[f.severity] || sc.medium, marginBottom: 8, border: `1px solid ${bc[f.severity] || bc.medium}20` }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <span style={{ fontSize: 12 }}>{icons[f.severity] || "⚠️"}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: tc[f.severity] || tc.medium, flex: 1 }}>{f.issue || f.flag}</span>
+                              <span style={{ fontSize: 10, fontWeight: 600, color: tc[f.severity] || tc.medium, textTransform: "uppercase", padding: "2px 8px", borderRadius: 6, background: `${bc[f.severity] || bc.medium}15` }}>{f.severity}</span>
+                            </div>
+                            <p style={{ margin: "0 0 6px", fontSize: 11, color: "#6b7280", paddingLeft: 22 }}>{f.recommendation || f.detail}</p>
+                            <div style={{ height: 4, borderRadius: 4, background: `${bc[f.severity] || bc.medium}20`, marginLeft: 22, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${pct[f.severity] || 50}%`, borderRadius: 4, background: bc[f.severity] || bc.medium, transition: "width 0.6s ease" }} />
+                            </div>
                           </div>
                         );
                       })}
@@ -1678,6 +1725,166 @@ export default function VisualOps() {
               )}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Agent Orchestration Diagram */}
+      {(running || hasResults) && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px 24px" }}>
+          <Card style={{ overflow: "hidden" }}>
+            <Section title="🔀 Agent Orchestration Pipeline — Live Data Flow">
+              <div style={{ position: "relative", padding: "20px 0" }}>
+                {/* Pipeline flow */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0 }}>
+                  {/* Image Input */}
+                  <div style={{ textAlign: "center", minWidth: 80 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 10, background: "#f3f4f6", border: "2px solid #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px", fontSize: 20 }}>📄</div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, color: "#6b7280" }}>Document</p>
+                  </div>
+                  {/* Arrow */}
+                  <div style={{ width: 40, height: 2, background: agentStates.vision !== "idle" ? "#3b82f6" : "#e5e7eb", position: "relative", transition: "background 0.5s" }}>
+                    <div style={{ position: "absolute", right: -4, top: -4, width: 0, height: 0, borderLeft: `8px solid ${agentStates.vision !== "idle" ? "#3b82f6" : "#e5e7eb"}`, borderTop: "5px solid transparent", borderBottom: "5px solid transparent" }} />
+                  </div>
+                  {/* Agent 1: Vision */}
+                  <div style={{ textAlign: "center", minWidth: 100 }}>
+                    <div style={{
+                      width: 56, height: 56, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px", fontSize: 22,
+                      background: agentStates.vision === "done" ? "linear-gradient(135deg, #f0fdf4, #dcfce7)" : agentStates.vision === "running" ? "linear-gradient(135deg, #eff6ff, #dbeafe)" : "#f9fafb",
+                      border: `2px solid ${agentStates.vision === "done" ? "#86efac" : agentStates.vision === "running" ? "#93c5fd" : "#e5e7eb"}`,
+                      boxShadow: agentStates.vision === "running" ? "0 0 16px rgba(59,130,246,0.3)" : "none",
+                      transition: "all 0.5s", animation: agentStates.vision === "running" ? "agentPulse 2s infinite" : "none",
+                    }}>👁</div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: agentStates.vision === "done" ? "#15803d" : agentStates.vision === "running" ? "#1d4ed8" : "#9ca3af" }}>Vision</p>
+                    <p style={{ margin: 0, fontSize: 9, color: "#9ca3af" }}>multimodal</p>
+                  </div>
+                  {/* Arrow to parallel split */}
+                  <div style={{ width: 30, height: 2, background: agentStates.research !== "idle" || agentStates.risk !== "idle" ? "#3b82f6" : "#e5e7eb", transition: "background 0.5s" }} />
+                  {/* Parallel Agents */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+                    <div style={{ position: "absolute", left: -8, top: "50%", transform: "translateY(-50%)", background: "#dbeafe", borderRadius: 4, padding: "2px 6px", fontSize: 8, fontWeight: 700, color: "#1d4ed8", whiteSpace: "nowrap" }}>PARALLEL</div>
+                    {/* Research */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 50 }}>
+                      <div style={{
+                        width: 48, height: 48, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                        background: agentStates.research === "done" ? "linear-gradient(135deg, #f0fdf4, #dcfce7)" : agentStates.research === "running" ? "linear-gradient(135deg, #eff6ff, #dbeafe)" : "#f9fafb",
+                        border: `2px solid ${agentStates.research === "done" ? "#86efac" : agentStates.research === "running" ? "#93c5fd" : "#e5e7eb"}`,
+                        boxShadow: agentStates.research === "running" ? "0 0 12px rgba(59,130,246,0.3)" : "none",
+                        transition: "all 0.5s", animation: agentStates.research === "running" ? "agentPulse 2s infinite" : "none",
+                      }}>🔍</div>
+                      <div>
+                        <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: agentStates.research === "done" ? "#15803d" : "#6b7280" }}>Research</p>
+                        <p style={{ margin: 0, fontSize: 9, color: "#9ca3af" }}>client intel</p>
+                      </div>
+                    </div>
+                    {/* Risk */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 50 }}>
+                      <div style={{
+                        width: 48, height: 48, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                        background: agentStates.risk === "done" ? "linear-gradient(135deg, #f0fdf4, #dcfce7)" : agentStates.risk === "running" ? "linear-gradient(135deg, #eff6ff, #dbeafe)" : "#f9fafb",
+                        border: `2px solid ${agentStates.risk === "done" ? "#86efac" : agentStates.risk === "running" ? "#93c5fd" : "#e5e7eb"}`,
+                        boxShadow: agentStates.risk === "running" ? "0 0 12px rgba(59,130,246,0.3)" : "none",
+                        transition: "all 0.5s", animation: agentStates.risk === "running" ? "agentPulse 2s infinite" : "none",
+                      }}>⚠️</div>
+                      <div>
+                        <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: agentStates.risk === "done" ? "#15803d" : "#6b7280" }}>Risk</p>
+                        <p style={{ margin: 0, fontSize: 9, color: "#9ca3af" }}>reasoning</p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Arrow from parallel to output */}
+                  <div style={{ width: 30, height: 2, background: agentStates.output !== "idle" ? "#3b82f6" : "#e5e7eb", transition: "background 0.5s" }} />
+                  {/* Agent 4: Output */}
+                  <div style={{ textAlign: "center", minWidth: 100 }}>
+                    <div style={{
+                      width: 56, height: 56, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px", fontSize: 22,
+                      background: agentStates.output === "done" ? "linear-gradient(135deg, #f0fdf4, #dcfce7)" : agentStates.output === "running" ? "linear-gradient(135deg, #eff6ff, #dbeafe)" : "#f9fafb",
+                      border: `2px solid ${agentStates.output === "done" ? "#86efac" : agentStates.output === "running" ? "#93c5fd" : "#e5e7eb"}`,
+                      boxShadow: agentStates.output === "running" ? "0 0 16px rgba(59,130,246,0.3)" : "none",
+                      transition: "all 0.5s", animation: agentStates.output === "running" ? "agentPulse 2s infinite" : "none",
+                    }}>📋</div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: agentStates.output === "done" ? "#15803d" : agentStates.output === "running" ? "#1d4ed8" : "#9ca3af" }}>Output</p>
+                    <p style={{ margin: 0, fontSize: 9, color: "#9ca3af" }}>synthesize</p>
+                  </div>
+                  {/* Arrow to package */}
+                  <div style={{ width: 40, height: 2, background: agentStates.output === "done" ? "#22c55e" : "#e5e7eb", position: "relative", transition: "background 0.5s" }}>
+                    <div style={{ position: "absolute", right: -4, top: -4, width: 0, height: 0, borderLeft: `8px solid ${agentStates.output === "done" ? "#22c55e" : "#e5e7eb"}`, borderTop: "5px solid transparent", borderBottom: "5px solid transparent" }} />
+                  </div>
+                  {/* Output Package */}
+                  <div style={{ textAlign: "center", minWidth: 80 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 10, background: agentStates.output === "done" ? "#dcfce7" : "#f3f4f6", border: `2px solid ${agentStates.output === "done" ? "#86efac" : "#d1d5db"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px", fontSize: 20, transition: "all 0.5s" }}>📦</div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, color: agentStates.output === "done" ? "#15803d" : "#6b7280" }}>{agentStates.output === "done" ? "Ready!" : "Package"}</p>
+                  </div>
+                </div>
+                {/* Data annotations */}
+                {hasResults && (
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, padding: "0 20px" }}>
+                    {[
+                      { label: "Image → JSON", detail: "Structured extraction" },
+                      { label: "JSON → Intel + Flags", detail: "Promise.all() parallel" },
+                      { label: "All → Package", detail: "Exec summary + plan + email" },
+                    ].map((a, i) => (
+                      <div key={i} style={{ textAlign: "center", flex: 1 }}>
+                        <p style={{ margin: 0, fontSize: 10, fontWeight: 600, color: "#3b82f6" }}>{a.label}</p>
+                        <p style={{ margin: 0, fontSize: 9, color: "#9ca3af" }}>{a.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Section>
+          </Card>
+        </div>
+      )}
+
+      {/* Processing History */}
+      {processHistory.length > 1 && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px 24px" }}>
+          <Card>
+            <Section title={`📜 Processing History — ${processHistory.length} Documents Analyzed`}>
+              <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0" }}>
+                {processHistory.map((h, i) => (
+                  <div key={h.id} style={{
+                    minWidth: 160, padding: "12px 14px", borderRadius: 10,
+                    background: i === processHistory.length - 1 ? "linear-gradient(135deg, #f0fdf4, #ecfdf5)" : "#f9fafb",
+                    border: `1px solid ${i === processHistory.length - 1 ? "#86efac" : "#e5e7eb"}`,
+                    flexShrink: 0,
+                  }}>
+                    <p style={{ margin: "0 0 4px", fontSize: 12, fontWeight: 700, color: "#111827" }}>#{i + 1} {h.company}</p>
+                    <p style={{ margin: 0, fontSize: 11, color: "#6b7280" }}>{h.elapsed}s · {h.tokensPerSec?.toLocaleString()} tok/s</p>
+                    <p style={{ margin: 0, fontSize: 10, color: "#9ca3af" }}>{h.totalTokens?.toLocaleString()} tokens · {h.timestamp}</p>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 10, display: "flex", gap: 16, justifyContent: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>
+                  Total: {processHistory.reduce((a, h) => a + (h.totalTokens || 0), 0).toLocaleString()} tokens
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#059669" }}>
+                  Avg: {(processHistory.reduce((a, h) => a + parseFloat(h.elapsed || 0), 0) / processHistory.length).toFixed(1)}s per doc
+                </span>
+              </div>
+            </Section>
+          </Card>
+        </div>
+      )}
+
+      {/* Hackathon Footer */}
+      <div style={{
+        maxWidth: 1200, margin: "24px auto 0", padding: "20px 24px",
+        borderTop: "1px solid #e5e7eb",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 20 }}>⚡</span>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "#374151" }}>Built for the Cerebras × Google DeepMind Gemma 4 Hackathon</p>
+            <p style={{ margin: 0, fontSize: 11, color: "#9ca3af" }}>Track 1: Multiverse Agents · Track 3: Enterprise Impact</p>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {["Gemma 4 31B", "WSE-3", "React", "Vite"].map((t, i) => (
+            <span key={i} style={{ padding: "3px 10px", borderRadius: 12, fontSize: 10, fontWeight: 500, background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" }}>{t}</span>
+          ))}
         </div>
       </div>
     </div>
