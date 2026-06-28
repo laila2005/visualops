@@ -98,42 +98,45 @@ function parseJSON(content, fallback) {
   }
 }
 
-// ─── Gemini API (Google AI Studio — for speed comparison) ─────────────────────
-// Calls Gemini via the Google generativelanguage REST API. Returns { content, ms }.
-async function callGemini(geminiKey, prompt) {
+// ─── OpenAI API (GPU-based — for speed comparison) ────────────────────────────
+// Calls OpenAI GPT-4o-mini via the chat completions API. Returns { content, ms, completionTokens }.
+async function callOpenAI(openaiKey, prompt) {
   const t0 = Date.now();
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${geminiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    }
-  );
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: 512,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Gemini API error ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`OpenAI API error ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return { content, ms: Date.now() - t0 };
+  const content = data.choices?.[0]?.message?.content || "";
+  const completionTokens = data.usage?.completion_tokens || 0;
+  return { content, ms: Date.now() - t0, completionTokens };
 }
 
-// Run the same prompt on both Cerebras and Gemini in parallel, return timings.
-async function runSpeedComparison(cerebrasKey, geminiKey, prompt) {
-  const [cerebrasResult, geminiResult] = await Promise.allSettled([
+// Run the same prompt on both Cerebras and OpenAI in parallel, return timings.
+async function runSpeedComparison(cerebrasKey, openaiKey, prompt) {
+  const [cerebrasResult, openaiResult] = await Promise.allSettled([
     callGemma(cerebrasKey, [{ role: "user", content: prompt }]),
-    callGemini(geminiKey, prompt),
+    callOpenAI(openaiKey, prompt),
   ]);
   return {
     cerebras: cerebrasResult.status === "fulfilled"
       ? { ms: cerebrasResult.value.ms, tokens: cerebrasResult.value.tokens, completionTokens: cerebrasResult.value.completionTokens, completionTime: cerebrasResult.value.completionTime, content: cerebrasResult.value.content, error: null }
       : { ms: 0, tokens: 0, completionTokens: 0, completionTime: 0, content: "", error: cerebrasResult.reason?.message || "Failed" },
-    gemini: geminiResult.status === "fulfilled"
-      ? { ms: geminiResult.value.ms, content: geminiResult.value.content, error: null }
-      : { ms: 0, content: "", error: geminiResult.reason?.message || "Failed" },
+    openai: openaiResult.status === "fulfilled"
+      ? { ms: openaiResult.value.ms, content: openaiResult.value.content, completionTokens: openaiResult.value.completionTokens, error: null }
+      : { ms: 0, content: "", completionTokens: 0, error: openaiResult.reason?.message || "Failed" },
   };
 }
 
@@ -614,8 +617,8 @@ function ChecklistItem({ task, priority, done, onToggle }) {
 export default function VisualOps() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(false);
-  const [geminiKey, setGeminiKey] = useState("");
-  const [geminiKeySet, setGeminiKeySet] = useState(false);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiKeySet, setOpenaiKeySet] = useState(false);
   const [models, setModels] = useState(null);
   const [modelsErr, setModelsErr] = useState(null);
   const [file, setFile] = useState(null);
@@ -709,14 +712,14 @@ export default function VisualOps() {
 
   // ─── Speed Comparison Handler ──────────────────────────────────────────────
   const handleSpeedCompare = async () => {
-    if (!apiKey || !geminiKey) return;
+    if (!apiKey || !openaiKey) return;
     setSpeedRunning(true);
     setSpeedError(null);
     setSpeedResult(null);
     const companyName = results.vision?.company_name || "the client";
     const prompt = `You are a B2B analyst. Write a concise 3-sentence executive summary for onboarding ${companyName} as a new enterprise client. Focus on key priorities and recommended next steps.`;
     try {
-      const result = await runSpeedComparison(apiKey, geminiKey, prompt);
+      const result = await runSpeedComparison(apiKey, openaiKey, prompt);
       setSpeedResult(result);
     } catch (e) {
       setSpeedError(e.message);
@@ -877,33 +880,33 @@ export default function VisualOps() {
             </div>
           )}
 
-          {/* Gemini API Key (for speed comparison) */}
-          {!geminiKeySet ? (
+          {/* OpenAI API Key (for speed comparison) */}
+          {!openaiKeySet ? (
             <Card style={{ marginBottom: 16 }}>
-              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>Gemini API Key <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>(optional — speed comparison)</span></p>
+              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>OpenAI API Key <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>(optional — speed comparison)</span></p>
               <input
                 type="password"
-                placeholder="AIza..."
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
+                placeholder="sk-..."
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
                 style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 13, marginBottom: 8 }}
               />
               <button
-                onClick={() => geminiKey.length > 8 && setGeminiKeySet(true)}
+                onClick={() => openaiKey.length > 8 && setOpenaiKeySet(true)}
                 style={{
                   width: "100%", padding: "8px", borderRadius: 8,
-                  background: "#7c3aed", color: "#fff", border: "none",
+                  background: "#10b981", color: "#fff", border: "none",
                   fontSize: 13, fontWeight: 500, cursor: "pointer",
                 }}
               >
-                Save Gemini key
+                Save OpenAI key
               </button>
             </Card>
           ) : (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f5f3ff", borderRadius: 8, border: "1px solid #ddd6fe" }}>
-                <span style={{ fontSize: 12, color: "#7c3aed" }}>✓ Gemini key set</span>
-                <button onClick={() => setGeminiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#ecfdf5", borderRadius: 8, border: "1px solid #a7f3d0" }}>
+                <span style={{ fontSize: 12, color: "#059669" }}>✓ OpenAI key set</span>
+                <button onClick={() => setOpenaiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
               </div>
             </div>
           )}
@@ -1226,17 +1229,17 @@ export default function VisualOps() {
                 </Card>
               )}
 
-              {/* ─── Speed Comparison: Cerebras vs Gemini ─────────────────── */}
-              {geminiKeySet && (
+              {/* ─── Speed Comparison: Cerebras vs OpenAI ─────────────────── */}
+              {openaiKeySet && (
                 <Card style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid #334155" }}>
-                  <Section title={<span style={{ color: "#94a3b8" }}>⚡ Speed in Action — Cerebras vs Gemini (Live Comparison)</span>}>
+                  <Section title={<span style={{ color: "#94a3b8" }}>⚡ Speed in Action — Cerebras WSE-3 vs OpenAI GPU (Live Comparison)</span>}>
                     {!speedResult && !speedRunning && (
                       <div style={{ textAlign: "center", padding: "20px 0" }}>
                         <p style={{ margin: "0 0 6px", fontSize: 14, color: "#e2e8f0", fontWeight: 600 }}>
                           Same prompt. Two providers. Real-time race.
                         </p>
                         <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748b" }}>
-                          Sends identical executive summary request to Cerebras (WSE-3) and Google Gemini simultaneously
+                          Sends identical executive summary request to Cerebras (WSE-3) and OpenAI (NVIDIA GPU) simultaneously
                         </p>
                         <button
                           onClick={handleSpeedCompare}
@@ -1263,12 +1266,14 @@ export default function VisualOps() {
                     )}
                     {speedResult && (() => {
                       const cOk = !speedResult.cerebras.error;
-                      const gOk = !speedResult.gemini.error;
+                      const oOk = !speedResult.openai.error;
                       const cMs = speedResult.cerebras.ms;
-                      const gMs = speedResult.gemini.ms;
+                      const oMs = speedResult.openai.ms;
                       const cTokSec = cOk && speedResult.cerebras.completionTime > 0
                         ? Math.round(speedResult.cerebras.completionTokens / speedResult.cerebras.completionTime) : 0;
-                      const speedup = cOk && gOk && gMs > 0 ? (gMs / Math.max(cMs, 1)).toFixed(1) : null;
+                      const oTokSec = oOk && oMs > 0 && speedResult.openai.completionTokens > 0
+                        ? Math.round((speedResult.openai.completionTokens / oMs) * 1000) : 0;
+                      const speedup = cOk && oOk && oMs > 0 ? (oMs / Math.max(cMs, 1)).toFixed(1) : null;
                       return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                           {/* Hero numbers row */}
@@ -1305,17 +1310,20 @@ export default function VisualOps() {
                                 </span>
                               )}
                             </div>
-                            {/* Gemini */}
+                            {/* OpenAI */}
                             <div style={{ padding: "20px 16px", borderRadius: 12, background: "rgba(148,163,184,0.06)", border: "1px solid rgba(148,163,184,0.15)", textAlign: "center" }}>
-                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.12em" }}>Gemini 2.0 Flash Lite</p>
-                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: gOk ? "#94a3b8" : "#f87171", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                                {gOk ? `${(gMs / 1000).toFixed(2)}s` : "Failed"}
+                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.12em" }}>OpenAI · GPT-4o-mini</p>
+                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: oOk ? "#94a3b8" : "#f87171", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                                {oOk ? `${(oMs / 1000).toFixed(2)}s` : "Failed"}
                               </p>
-                              {gOk && (
-                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>GPU inference</p>
+                              {oOk && oTokSec > 0 && (
+                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>{oTokSec.toLocaleString()} tok/s</p>
                               )}
-                              {!gOk && (
-                                <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>Quota exceeded / rate limited</p>
+                              {oOk && !oTokSec && (
+                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>NVIDIA GPU</p>
+                              )}
+                              {!oOk && (
+                                <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{speedResult.openai.error?.slice(0, 60)}</p>
                               )}
                             </div>
                           </div>
@@ -1327,18 +1335,18 @@ export default function VisualOps() {
                                 <tr style={{ background: "rgba(30,41,59,0.8)" }}>
                                   <th style={{ padding: "10px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Metric</th>
                                   <th style={{ padding: "10px 14px", textAlign: "center", color: "#4ade80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Cerebras (WSE-3)</th>
-                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Gemini (GPU)</th>
+                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>OpenAI (NVIDIA GPU)</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {[
-                                  ["Model", "Gemma 4 31B", "Gemini 2.0 Flash Lite"],
-                                  ["Hardware", "WSE-3 · 900K cores · 44GB SRAM", "Cloud GPU cluster"],
-                                  ["Response time", cOk ? `${(cMs / 1000).toFixed(2)}s` : "—", gOk ? `${(gMs / 1000).toFixed(2)}s` : "Rate limited"],
-                                  ["Throughput", cTokSec > 0 ? `${cTokSec.toLocaleString()} tok/s` : "—", gOk ? "~50-200 tok/s (est.)" : "—"],
-                                  ["Total tokens", cOk ? `${speedResult.cerebras.tokens}` : "—", gOk ? "N/A" : "—"],
-                                  ["Completion tokens", cOk && speedResult.cerebras.completionTokens ? `${speedResult.cerebras.completionTokens}` : "—", gOk ? "N/A" : "—"],
-                                  ["Inference time (API)", cOk && speedResult.cerebras.completionTime > 0 ? `${(speedResult.cerebras.completionTime * 1000).toFixed(0)}ms` : "—", gOk ? `${gMs}ms (wall)` : "—"],
+                                  ["Model", "Gemma 4 31B", "GPT-4o-mini"],
+                                  ["Hardware", "WSE-3 · 900K cores · 44GB SRAM", "NVIDIA GPU cluster"],
+                                  ["Response time", cOk ? `${(cMs / 1000).toFixed(2)}s` : "—", oOk ? `${(oMs / 1000).toFixed(2)}s` : "Error"],
+                                  ["Throughput", cTokSec > 0 ? `${cTokSec.toLocaleString()} tok/s` : "—", oTokSec > 0 ? `${oTokSec.toLocaleString()} tok/s` : "—"],
+                                  ["Total tokens", cOk ? `${speedResult.cerebras.tokens}` : "—", oOk ? `${speedResult.openai.completionTokens} (completion)` : "—"],
+                                  ["Completion tokens", cOk && speedResult.cerebras.completionTokens ? `${speedResult.cerebras.completionTokens}` : "—", oOk && speedResult.openai.completionTokens ? `${speedResult.openai.completionTokens}` : "—"],
+                                  ["Inference time (API)", cOk && speedResult.cerebras.completionTime > 0 ? `${(speedResult.cerebras.completionTime * 1000).toFixed(0)}ms` : "—", oOk ? `${oMs}ms (wall)` : "—"],
                                 ].map(([label, cerebras, gemini], i) => (
                                   <tr key={i} style={{ borderTop: "1px solid #1e293b" }}>
                                     <td style={{ padding: "8px 14px", color: "#cbd5e1", fontWeight: 500 }}>{label}</td>
@@ -1366,7 +1374,7 @@ export default function VisualOps() {
                           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
                             <span style={{ fontSize: 16 }}>🧪</span>
                             <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
-                              <strong style={{ color: "#e2e8f0" }}>Methodology:</strong> Identical prompt sent to both APIs simultaneously via <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>Promise.allSettled()</code>. Cerebras timing uses <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>time_info.completion_time</code> from the API for precise measurement. WSE-3 achieves ~1,850 tok/s on Gemma 4 31B using 4 trillion transistors and 900K cores with 44GB on-chip SRAM — no off-chip memory bottleneck.
+                              <strong style={{ color: "#e2e8f0" }}>Methodology:</strong> Identical prompt sent to both APIs simultaneously via <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>Promise.allSettled()</code>. Cerebras timing uses <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>time_info.completion_time</code> for precise server-side measurement. WSE-3 achieves ~1,850 tok/s on Gemma 4 31B with 4 trillion transistors, 900K cores, and 44GB on-chip SRAM — zero off-chip memory bottleneck. OpenAI runs GPT-4o-mini on NVIDIA GPU clusters with standard HBM memory hierarchy.
                             </p>
                           </div>
 
