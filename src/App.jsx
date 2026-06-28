@@ -475,34 +475,52 @@ async function runPipeline(apiKey, base64Image, mimeType, onUpdate) {
 // ─── UI Components ────────────────────────────────────────────────────────────
 
 function AgentBadge({ label, icon, status, meta }) {
-  const colors = {
-    idle: { bg: "#f5f5f5", border: "#e0e0e0", text: "#999", dot: "#ccc" },
-    running: { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8", dot: "#3b82f6" },
-    done: { bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d", dot: "#22c55e" },
+  const isRunning = status === "running";
+  const isDone = status === "done";
+  const isError = status === "error";
+  
+  const statusColors = {
+    idle: { bg: "#f9fafb", border: "#e5e7eb", text: "#9ca3af", dot: "#d1d5db" },
+    running: { bg: "linear-gradient(135deg, #eff6ff, #f0f9ff)", border: "#93c5fd", text: "#1d4ed8", dot: "#3b82f6" },
+    done: { bg: "linear-gradient(135deg, #f0fdf4, #ecfdf5)", border: "#86efac", text: "#15803d", dot: "#22c55e" },
+    error: { bg: "#fef2f2", border: "#fecaca", text: "#dc2626", dot: "#ef4444" },
   };
-  const c = colors[status] || colors.idle;
+  const c = statusColors[status] || statusColors.idle;
+
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "8px 14px", borderRadius: 8,
-      background: c.bg, border: `1px solid ${c.border}`,
-      transition: "all 0.3s ease",
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", borderRadius: 10,
+      background: c.bg, border: `1.5px solid ${c.border}`,
+      transition: "all 0.4s ease",
+      boxShadow: isRunning ? `0 0 16px rgba(59,130,246,0.2)` : isDone ? `0 0 12px rgba(34,197,94,0.15)` : "none",
+      animation: isRunning ? "agentPulse 2s ease-in-out infinite" : isDone ? "agentSlideIn 0.4s ease-out" : "none",
     }}>
-      <span style={{
-        width: 8, height: 8, borderRadius: "50%",
-        background: c.dot,
-        boxShadow: status === "running" ? `0 0 0 3px ${c.border}` : "none",
-        animation: status === "running" ? "pulse 1.5s infinite" : "none",
-      }} />
-      <span style={{ fontSize: 13, fontWeight: 500, color: c.text }}>{icon} {label}</span>
-      {status === "running" && (
-        <span style={{ fontSize: 11, color: c.text, marginLeft: "auto" }}>running...</span>
-      )}
-      {status === "done" && (
-        <span style={{ fontSize: 11, color: c.text, marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
-          {meta?.ms != null ? `${(meta.ms / 1000).toFixed(1)}s` : "✓"}
-        </span>
-      )}
+      <span style={{ fontSize: 18, filter: isRunning ? "none" : isDone ? "none" : "grayscale(0.5)", transition: "filter 0.3s" }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: c.text, transition: "color 0.3s" }}>{label}</p>
+        {isDone && meta && (
+          <p style={{ margin: "2px 0 0", fontSize: 11, color: "#6b7280", fontVariantNumeric: "tabular-nums" }}>
+            {meta.ms}ms · {meta.tokens} tok{meta.completionTime > 0 ? ` · ${Math.round(meta.completionTokens / meta.completionTime).toLocaleString()} tok/s` : ""}
+          </p>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {isRunning && (
+          <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{
+                width: 4, height: 4, borderRadius: "50%",
+                background: "#3b82f6",
+                animation: `agentDotBounce 1.2s ease-in-out ${i * 0.15}s infinite`,
+              }} />
+            ))}
+          </div>
+        )}
+        {isDone && <span style={{ fontSize: 16, animation: "agentCheckPop 0.3s ease-out" }}>✓</span>}
+        {isError && <span style={{ fontSize: 14, color: "#dc2626" }}>✕</span>}
+        {status === "idle" && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#d1d5db" }} />}
+      </div>
     </div>
   );
 }
@@ -656,6 +674,46 @@ export default function VisualOps() {
     }
   }, []);
 
+  // Inject CSS animations for agent badges
+  useEffect(() => {
+    const styleId = "visualops-animations";
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      @keyframes agentPulse {
+        0%, 100% { box-shadow: 0 0 8px rgba(59,130,246,0.15); }
+        50% { box-shadow: 0 0 20px rgba(59,130,246,0.35); }
+      }
+      @keyframes agentSlideIn {
+        0% { transform: translateX(-8px); opacity: 0.5; }
+        100% { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes agentCheckPop {
+        0% { transform: scale(0); }
+        60% { transform: scale(1.3); }
+        100% { transform: scale(1); }
+      }
+      @keyframes agentDotBounce {
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-6px); }
+      }
+      @keyframes fadeInUp {
+        0% { opacity: 0; transform: translateY(16px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
   const handleFile = (f) => {
     if (!f || !f.type.startsWith("image/")) return;
     setFile(f);
@@ -700,6 +758,89 @@ export default function VisualOps() {
     setChecklist((prev) => prev.map((item, idx) => idx === i ? { ...item, done: !item.done } : item));
   };
 
+  const generateMarkdown = () => {
+    const v = results.vision || {};
+    const r = results.research || {};
+    const rk = results.risk || {};
+    const o = results.output || {};
+    let md = `# Onboarding Package: ${v.company_name || "Client"}\n\n`;
+    md += `> Generated by VisualOps — 4-Agent B2B Onboarding Intelligence\n`;
+    md += `> Powered by Gemma 4 31B on Cerebras WSE-3 · ${elapsed || "N/A"} · ${tokensPerSec ? tokensPerSec.toLocaleString() + " tok/s" : ""}\n\n`;
+    md += `---\n\n`;
+    // Executive Summary
+    if (o.executive_summary) {
+      md += `## Executive Summary\n\n${o.executive_summary}\n\n`;
+    }
+    // Onboarding Plan
+    if (o.onboarding_plan?.length) {
+      md += `## Onboarding Plan\n\n`;
+      md += `| # | Step | Owner | Timeline | Details |\n|---|------|-------|----------|---------|\n`;
+      o.onboarding_plan.forEach((s, i) => {
+        md += `| ${i + 1} | ${s.step} | ${s.owner} | ${s.timeline} | ${s.details} |\n`;
+      });
+      md += `\n`;
+    }
+    // Welcome Email
+    if (o.welcome_email) {
+      md += `## Welcome Email Draft\n\n${o.welcome_email}\n\n`;
+    }
+    // Action Checklist
+    if (o.action_checklist?.length) {
+      md += `## Action Checklist\n\n`;
+      o.action_checklist.forEach((item) => {
+        md += `- [ ] **[${(item.priority || "medium").toUpperCase()}]** ${item.task}\n`;
+      });
+      md += `\n`;
+    }
+    // Success Metrics
+    if (o.success_metrics?.length) {
+      md += `## Success Metrics\n\n`;
+      o.success_metrics.forEach((m) => {
+        md += `- ✅ ${m}\n`;
+      });
+      md += `\n`;
+    }
+    // Client Intelligence
+    if (r.company_profile || r.pain_points?.length) {
+      md += `## Client Intelligence\n\n`;
+      if (r.company_profile) md += `**Company Profile:** ${r.company_profile}\n\n`;
+      if (r.pain_points?.length) {
+        md += `**Pain Points:**\n`;
+        r.pain_points.forEach((p) => { md += `- ${p}\n`; });
+        md += `\n`;
+      }
+      if (r.likely_tech_stack?.length) {
+        md += `**Likely Tech Stack:** ${r.likely_tech_stack.join(", ")}\n\n`;
+      }
+      if (r.recommended_approach) md += `**Recommended Approach:** ${r.recommended_approach}\n\n`;
+    }
+    // Risk Assessment
+    if (rk.overall_score) {
+      md += `## Risk Assessment\n\n`;
+      md += `**Overall Score:** ${rk.overall_score}/10 — **Recommendation:** ${rk.recommendation || "N/A"}\n\n`;
+      if (rk.flags?.length) {
+        md += `| Flag | Severity | Detail |\n|------|----------|--------|\n`;
+        rk.flags.forEach((f) => {
+          md += `| ${f.flag} | ${f.severity} | ${f.detail} |\n`;
+        });
+        md += `\n`;
+      }
+    }
+    md += `---\n\n*Generated at ${new Date().toISOString()} by VisualOps*\n`;
+    return md;
+  };
+
+  const downloadPackage = () => {
+    const md = generateMarkdown();
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `onboarding-package-${(results.vision?.company_name || "client").toLowerCase().replace(/\s+/g, "-")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const checkModels = async () => {
     setModels(null);
     setModelsErr(null);
@@ -728,53 +869,6 @@ export default function VisualOps() {
     }
   };
 
-  const downloadPackage = () => {
-    const v = results.vision || {};
-    const r = results.research || {};
-    const rk = results.risk || {};
-    const o = results.output || {};
-    const list = (arr) => (Array.isArray(arr) ? arr : []);
-    const md = [
-      `# Onboarding Package — ${v.company_name || "Client"}`,
-      ``,
-      `_Generated by VisualOps · Gemma 4 31B on Cerebras · ${elapsed}s · ${tokensPerSec?.toLocaleString()} tok/s_`,
-      ``,
-      `## Snapshot`,
-      `- **Company:** ${v.company_name || "—"}`,
-      `- **Industry:** ${v.industry || "—"}`,
-      `- **Document type:** ${v.document_type || "—"}`,
-      `- **Deal value:** ${v.deal_value || "—"}`,
-      `- **Risk:** ${(rk.risk_score || "—").toUpperCase()} (${rk.risk_score_number ?? "—"}/10) · ${rk.proceed_recommendation || "—"}`,
-      `- **Key contacts:** ${list(v.key_contacts).join("; ") || "—"}`,
-      ``,
-      `## Executive summary`,
-      o.executive_summary || "—",
-      ``,
-      `## Onboarding plan`,
-      ...list(o.onboarding_plan).map((s) => `${s.step}. **${s.action}** — ${s.owner} · ${s.timeline} (${s.goal})`),
-      ``,
-      `## Risk flags`,
-      ...(list(rk.flags).length ? list(rk.flags).map((f) => `- [${(f.severity || "").toUpperCase()}] ${f.issue} → ${f.recommendation}`) : ["- None detected"]),
-      rk.compliance_notes ? `\n_Compliance: ${rk.compliance_notes}_` : "",
-      ``,
-      `## Action checklist`,
-      ...list(checklist).map((c) => `- [${c.done ? "x" : " "}] (${c.priority}) ${c.task}`),
-      ``,
-      `## Success metrics`,
-      ...list(o.success_metrics).map((m) => `- ${m}`),
-      ``,
-      `## Welcome email`,
-      o.welcome_email ? `**Subject:** ${o.welcome_email.subject}\n\n${o.welcome_email.body}` : "—",
-      ``,
-    ].join("\n");
-    const blob = new Blob([md], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `onboarding-${(v.company_name || "client").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const hasResults = results.output !== null;
   const riskData = results.risk;
@@ -786,9 +880,6 @@ export default function VisualOps() {
     <div style={{ minHeight: "100vh", background: "#f9fafb", fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes slideIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         * { box-sizing: border-box; }
         textarea { resize: vertical; }
         input:focus, textarea:focus, button:focus { outline: 2px solid #3b82f6; outline-offset: 2px; }
@@ -987,23 +1078,109 @@ export default function VisualOps() {
               {error}
             </div>
           )}
+
+          {hasResults && !running && (
+            <button
+              onClick={downloadPackage}
+              style={{
+                width: "100%", padding: "12px", marginTop: 10,
+                background: "linear-gradient(135deg, #059669, #10b981)",
+                color: "#fff", border: "none", borderRadius: 10,
+                fontSize: 14, fontWeight: 600, cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(5,150,105,0.3)",
+                transition: "all 0.3s ease",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
+              onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+            >
+              📥 Download Onboarding Package (.md)
+            </button>
+          )}
         </div>
 
         {/* Right panel — results */}
         <div>
           {!hasResults && !running && (
-            <div style={{ height: 400, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-              <p style={{ fontSize: 40, margin: 0 }}>🤖</p>
-              <p style={{ margin: 0, fontSize: 15, color: "#9ca3af" }}>Upload a document and run the pipeline to see results</p>
-              <p style={{ margin: 0, fontSize: 12, color: "#d1d5db" }}>Contract · Proposal · Invoice · Org chart · Logo</p>
+            <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 500, gap: 20 }}>
+              {/* Hero */}
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 56, marginBottom: 12, animation: "fadeInUp 0.6s ease-out" }}>🤖⚡</div>
+                <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
+                  AI-Powered Onboarding Intelligence
+                </h2>
+                <p style={{ margin: "0 0 6px", fontSize: 15, color: "#6b7280", maxWidth: 420, lineHeight: 1.5 }}>
+                  Upload any business document and get a complete onboarding package in seconds — powered by 4 AI agents.
+                </p>
+              </div>
+
+              {/* Feature grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, width: "100%", maxWidth: 480 }}>
+                {[
+                  { icon: "👁", title: "Vision Agent", desc: "Reads images directly via Gemma 4 multimodal" },
+                  { icon: "🔍", title: "Research Agent", desc: "Builds client intelligence profile" },
+                  { icon: "⚠️", title: "Risk Agent", desc: "Scans for red flags with reasoning mode" },
+                  { icon: "📋", title: "Output Agent", desc: "Generates complete onboarding package" },
+                ].map((f, i) => (
+                  <div key={i} style={{
+                    padding: "14px 16px", borderRadius: 10, background: "#f9fafb",
+                    border: "1px solid #e5e7eb", animation: `fadeInUp ${0.4 + i * 0.1}s ease-out`,
+                  }}>
+                    <div style={{ fontSize: 20, marginBottom: 4 }}>{f.icon}</div>
+                    <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 600, color: "#374151" }}>{f.title}</p>
+                    <p style={{ margin: 0, fontSize: 11, color: "#9ca3af", lineHeight: 1.4 }}>{f.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Tech badges */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", animation: "fadeInUp 0.8s ease-out" }}>
+                {["Gemma 4 31B", "Cerebras WSE-3", "~1,850 tok/s", "Structured Outputs", "Reasoning Mode", "Parallel Agents"].map((t, i) => (
+                  <span key={i} style={{
+                    padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 500,
+                    background: i < 3 ? "linear-gradient(135deg, #eff6ff, #f0f9ff)" : "#f3f4f6",
+                    border: `1px solid ${i < 3 ? "#bfdbfe" : "#e5e7eb"}`,
+                    color: i < 3 ? "#1d4ed8" : "#6b7280",
+                  }}>{t}</span>
+                ))}
+              </div>
+
+              <p style={{ margin: 0, fontSize: 12, color: "#d1d5db" }}>
+                ← Upload a document image to get started
+              </p>
             </div>
           )}
 
           {running && !hasResults && (
-            <div style={{ height: 400, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 40, animation: "pulse 1.5s infinite" }}>⚡</div>
-              <p style={{ margin: 0, fontSize: 15, color: "#374151", fontWeight: 500 }}>Agents working at Cerebras speed...</p>
-              <p style={{ margin: 0, fontSize: 12, color: "#9ca3af" }}>~1,850 tokens/sec · Gemma 4 31B · WSE-3</p>
+            <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 500, gap: 16 }}>
+              <div style={{ fontSize: 52, animation: "pulse 1.2s infinite" }}>⚡</div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Agents Working at Cerebras Speed</h3>
+              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>~1,850 tokens/sec · Gemma 4 31B on WSE-3</p>
+
+              {/* Live agent status */}
+              <div style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                {[
+                  { key: "vision", label: "Vision — reading document", icon: "👁" },
+                  { key: "research", label: "Research — client intelligence", icon: "🔍" },
+                  { key: "risk", label: "Risk — scanning for flags", icon: "⚠️" },
+                  { key: "output", label: "Output — generating package", icon: "📋" },
+                ].map(({ key, label, icon }) => {
+                  const s = agentStates[key];
+                  return (
+                    <div key={key} style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8,
+                      background: s === "running" ? "#eff6ff" : s === "done" ? "#f0fdf4" : "#f9fafb",
+                      border: `1px solid ${s === "running" ? "#93c5fd" : s === "done" ? "#86efac" : "#e5e7eb"}`,
+                      transition: "all 0.3s",
+                    }}>
+                      <span style={{ fontSize: 14 }}>{icon}</span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: s === "done" ? "#15803d" : s === "running" ? "#1d4ed8" : "#9ca3af" }}>{label}</span>
+                      {s === "running" && <span style={{ fontSize: 12, animation: "pulse 1s infinite" }}>●</span>}
+                      {s === "done" && <span style={{ fontSize: 12, color: "#22c55e" }}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
