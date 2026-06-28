@@ -99,7 +99,6 @@ function parseJSON(content, fallback) {
 }
 
 // ─── OpenAI API (GPU-based — for speed comparison) ────────────────────────────
-// Calls OpenAI GPT-4o-mini via the chat completions API. Returns { content, ms, completionTokens }.
 async function callOpenAI(openaiKey, prompt) {
   const t0 = Date.now();
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -116,8 +115,8 @@ async function callOpenAI(openaiKey, prompt) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    if (res.status === 401) throw new Error("Invalid OpenAI API key — check your key and try again");
-    if (res.status === 429) throw new Error("OpenAI rate limit — wait a moment and retry");
+    if (res.status === 401) throw new Error("Invalid OpenAI API key");
+    if (res.status === 429) throw new Error("OpenAI rate limited");
     throw new Error(`OpenAI error ${res.status}: ${body.slice(0, 200)}`);
   }
   const data = await res.json();
@@ -126,20 +125,57 @@ async function callOpenAI(openaiKey, prompt) {
   return { content, ms: Date.now() - t0, completionTokens };
 }
 
-// Run the same prompt on both Cerebras and OpenAI in parallel, return timings.
-async function runSpeedComparison(cerebrasKey, openaiKey, prompt) {
-  const [cerebrasResult, openaiResult] = await Promise.allSettled([
+// ─── Gemini API (Google TPU — free tier, for speed comparison) ─────────────────
+async function callGemini(geminiKey, prompt) {
+  const t0 = Date.now();
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 512 },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    if (res.status === 401 || res.status === 403) throw new Error("Invalid Gemini API key");
+    if (res.status === 429) throw new Error("Gemini rate limited");
+    throw new Error(`Gemini error ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const completionTokens = data.usageMetadata?.candidatesTokenCount || 0;
+  return { content, ms: Date.now() - t0, completionTokens };
+}
+
+// Run the same prompt on Cerebras + any available comparison providers in parallel.
+async function runSpeedComparison(cerebrasKey, openaiKey, geminiKey, prompt) {
+  const promises = [
     callGemma(cerebrasKey, [{ role: "user", content: prompt }]),
-    callOpenAI(openaiKey, prompt),
-  ]);
-  return {
-    cerebras: cerebrasResult.status === "fulfilled"
-      ? { ms: cerebrasResult.value.ms, tokens: cerebrasResult.value.tokens, completionTokens: cerebrasResult.value.completionTokens, completionTime: cerebrasResult.value.completionTime, content: cerebrasResult.value.content, error: null }
-      : { ms: 0, tokens: 0, completionTokens: 0, completionTime: 0, content: "", error: cerebrasResult.reason?.message || "Failed" },
-    openai: openaiResult.status === "fulfilled"
-      ? { ms: openaiResult.value.ms, content: openaiResult.value.content, completionTokens: openaiResult.value.completionTokens, error: null }
-      : { ms: 0, content: "", completionTokens: 0, error: openaiResult.reason?.message || "Failed" },
-  };
+  ];
+  const providers = ["cerebras"];
+  if (openaiKey) { promises.push(callOpenAI(openaiKey, prompt)); providers.push("openai"); }
+  if (geminiKey) { promises.push(callGemini(geminiKey, prompt)); providers.push("gemini"); }
+
+  const settled = await Promise.allSettled(promises);
+  const result = {};
+  providers.forEach((name, i) => {
+    const s = settled[i];
+    if (s.status === "fulfilled") {
+      result[name] = {
+        ms: s.value.ms, tokens: s.value.tokens || 0,
+        completionTokens: s.value.completionTokens || 0,
+        completionTime: s.value.completionTime || 0,
+        content: s.value.content, error: null,
+      };
+    } else {
+      result[name] = { ms: 0, tokens: 0, completionTokens: 0, completionTime: 0, content: "", error: s.reason?.message || "Failed" };
+    }
+  });
+  // Ensure all keys exist even if not run
+  if (!result.openai) result.openai = null;
+  if (!result.gemini) result.gemini = null;
+  return result;
 }
 
 // ─── Image → Base64 ───────────────────────────────────────────────────────────
@@ -639,6 +675,8 @@ export default function VisualOps() {
   const [apiKeySet, setApiKeySet] = useState(false);
   const [openaiKey, setOpenaiKey] = useState("");
   const [openaiKeySet, setOpenaiKeySet] = useState(false);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiKeySet, setGeminiKeySet] = useState(false);
   const [models, setModels] = useState(null);
   const [modelsErr, setModelsErr] = useState(null);
   const [file, setFile] = useState(null);
@@ -909,14 +947,14 @@ export default function VisualOps() {
 
   // ─── Speed Comparison Handler ──────────────────────────────────────────────
   const handleSpeedCompare = async () => {
-    if (!apiKey || !openaiKey) return;
+    if (!apiKey || (!openaiKey && !geminiKey)) return;
     setSpeedRunning(true);
     setSpeedError(null);
     setSpeedResult(null);
     const companyName = results.vision?.company_name || "the client";
     const prompt = `You are a B2B analyst. Write a concise 3-sentence executive summary for onboarding ${companyName} as a new enterprise client. Focus on key priorities and recommended next steps.`;
     try {
-      const result = await runSpeedComparison(apiKey, openaiKey, prompt);
+      const result = await runSpeedComparison(apiKey, openaiKey || null, geminiKey || null, prompt);
       setSpeedResult(result);
     } catch (e) {
       setSpeedError(e.message);
@@ -1037,8 +1075,8 @@ export default function VisualOps() {
 
           {/* OpenAI API Key (for speed comparison) */}
           {!openaiKeySet ? (
-            <Card style={{ marginBottom: 16 }}>
-              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>OpenAI API Key <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>(optional — speed comparison)</span></p>
+            <Card style={{ marginBottom: 12 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>OpenAI API Key <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>(optional — GPU comparison)</span></p>
               <input
                 type="password"
                 placeholder="sk-..."
@@ -1058,10 +1096,41 @@ export default function VisualOps() {
               </button>
             </Card>
           ) : (
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#ecfdf5", borderRadius: 8, border: "1px solid #a7f3d0" }}>
                 <span style={{ fontSize: 12, color: "#059669" }}>✓ OpenAI key set</span>
                 <button onClick={() => setOpenaiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
+              </div>
+            </div>
+          )}
+
+          {/* Gemini API Key (free tier — TPU comparison) */}
+          {!geminiKeySet ? (
+            <Card style={{ marginBottom: 16 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>Gemini API Key <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 500 }}>(free — TPU comparison)</span></p>
+              <input
+                type="password"
+                placeholder="AIza..."
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 13, marginBottom: 8 }}
+              />
+              <button
+                onClick={() => geminiKey.length > 8 && setGeminiKeySet(true)}
+                style={{
+                  width: "100%", padding: "8px", borderRadius: 8,
+                  background: "linear-gradient(135deg, #4285f4, #34a853)", color: "#fff", border: "none",
+                  fontSize: 13, fontWeight: 500, cursor: "pointer",
+                }}
+              >
+                Save Gemini key (free)
+              </button>
+            </Card>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#ecfdf5", borderRadius: 8, border: "1px solid #a7f3d0" }}>
+                <span style={{ fontSize: 12, color: "#059669" }}>✓ Gemini key set (free tier)</span>
+                <button onClick={() => setGeminiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
               </div>
             </div>
           )}
@@ -1637,17 +1706,17 @@ export default function VisualOps() {
                 </Card>
               )}
 
-              {/* ─── Speed Comparison: Cerebras vs OpenAI ─────────────────── */}
-              {openaiKeySet && (
+              {/* ─── Speed Comparison: Multi-Provider Race ─────────────────── */}
+              {(openaiKeySet || geminiKeySet) && (
                 <Card style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid #334155" }}>
-                  <Section title={<span style={{ color: "#94a3b8" }}>⚡ Speed in Action — Cerebras WSE-3 vs OpenAI GPU (Live Comparison)</span>}>
+                  <Section title={<span style={{ color: "#94a3b8" }}>⚡ Speed in Action — Cerebras WSE-3 vs {[openaiKeySet && "OpenAI GPU", geminiKeySet && "Google TPU"].filter(Boolean).join(" vs ")} (Live Race)</span>}>
                     {!speedResult && !speedRunning && (
                       <div style={{ textAlign: "center", padding: "20px 0" }}>
                         <p style={{ margin: "0 0 6px", fontSize: 14, color: "#e2e8f0", fontWeight: 600 }}>
-                          Same prompt. Two providers. Real-time race.
+                          Same prompt. {[openaiKeySet, geminiKeySet].filter(Boolean).length + 1} providers. Real-time race.
                         </p>
                         <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748b" }}>
-                          Sends identical executive summary request to Cerebras (WSE-3) and OpenAI (NVIDIA GPU) simultaneously
+                          Sends identical request to all providers simultaneously via Promise.allSettled()
                         </p>
                         <button
                           onClick={handleSpeedCompare}
@@ -1656,7 +1725,7 @@ export default function VisualOps() {
                             background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
                             color: "#fff", border: "none", fontSize: 15, fontWeight: 700,
                             cursor: "pointer", boxShadow: "0 4px 20px rgba(59,130,246,0.5)",
-                            transition: "all 0.3s ease", letterSpacing: "-0.01em",
+                            transition: "all 0.3s ease",
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
                           onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
@@ -1668,133 +1737,97 @@ export default function VisualOps() {
                     {speedRunning && (
                       <div style={{ textAlign: "center", padding: "24px 0" }}>
                         <div style={{ fontSize: 36, animation: "pulse 1s infinite" }}>⚡</div>
-                        <p style={{ margin: "8px 0 0", fontSize: 14, color: "#e2e8f0", fontWeight: 500 }}>Racing Cerebras vs Gemini...</p>
+                        <p style={{ margin: "8px 0 0", fontSize: 14, color: "#e2e8f0", fontWeight: 500 }}>Racing {[openaiKeySet, geminiKeySet].filter(Boolean).length + 1} providers...</p>
                         <p style={{ margin: "4px 0 0", fontSize: 12, color: "#64748b" }}>Same prompt sent simultaneously via Promise.allSettled()</p>
                       </div>
                     )}
                     {speedResult && (() => {
-                      const cOk = !speedResult.cerebras.error;
-                      const oOk = !speedResult.openai.error;
-                      const cMs = speedResult.cerebras.ms;
-                      const oMs = speedResult.openai.ms;
-                      const cTokSec = cOk && speedResult.cerebras.completionTime > 0
-                        ? Math.round(speedResult.cerebras.completionTokens / speedResult.cerebras.completionTime) : 0;
-                      const oTokSec = oOk && oMs > 0 && speedResult.openai.completionTokens > 0
-                        ? Math.round((speedResult.openai.completionTokens / oMs) * 1000) : 0;
-                      const speedup = cOk && oOk && oMs > 0 ? (oMs / Math.max(cMs, 1)).toFixed(1) : null;
+                      const c = speedResult.cerebras;
+                      const o = speedResult.openai;
+                      const g = speedResult.gemini;
+                      const cOk = c && !c.error;
+                      const oOk = o && !o.error;
+                      const gOk = g && !g.error;
+                      const cMs = c?.ms || 0;
+                      const oMs = o?.ms || 0;
+                      const gMs = g?.ms || 0;
+                      const cTokSec = cOk && c.completionTime > 0 ? Math.round(c.completionTokens / c.completionTime) : 0;
+                      const oTokSec = oOk && oMs > 0 && o.completionTokens > 0 ? Math.round((o.completionTokens / oMs) * 1000) : 0;
+                      const gTokSec = gOk && gMs > 0 && g.completionTokens > 0 ? Math.round((g.completionTokens / gMs) * 1000) : 0;
+
+                      // Build competitors array
+                      const competitors = [];
+                      if (o) competitors.push({ name: "OpenAI", model: "GPT-4o-mini", hw: "NVIDIA GPU", ok: oOk, ms: oMs, tokSec: oTokSec, error: o.error, color: "#94a3b8" });
+                      if (g) competitors.push({ name: "Gemini", model: "2.0 Flash", hw: "Google TPU", ok: gOk, ms: gMs, tokSec: gTokSec, error: g.error, color: "#60a5fa" });
+
+                      // Find the slowest competitor for speedup calc
+                      const slowest = competitors.filter(x => x.ok).sort((a, b) => b.ms - a.ms)[0];
+                      const speedup = cOk && slowest ? (slowest.ms / Math.max(cMs, 1)).toFixed(1) : null;
+
                       return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                          {/* Hero numbers row */}
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center" }}>
+                          {/* Hero cards */}
+                          <div style={{ display: "grid", gridTemplateColumns: `1fr ${competitors.map(() => "auto 1fr").join(" ")}`, gap: 8, alignItems: "center" }}>
                             {/* Cerebras */}
-                            <div style={{ padding: "20px 16px", borderRadius: 12, background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04))", border: "1px solid rgba(34,197,94,0.25)", textAlign: "center" }}>
-                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.12em" }}>Cerebras · Gemma 4 31B</p>
-                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: "#4ade80", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                            <div style={{ padding: "20px 14px", borderRadius: 12, background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04))", border: "1px solid rgba(34,197,94,0.25)", textAlign: "center" }}>
+                              <p style={{ margin: "0 0 2px", fontSize: 9, fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.12em" }}>Cerebras · Gemma 4 31B</p>
+                              <p style={{ margin: "0 0 4px", fontSize: 32, fontWeight: 800, color: "#4ade80", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
                                 {cOk ? `${(cMs / 1000).toFixed(2)}s` : "Error"}
                               </p>
-                              {cOk && cTokSec > 0 && (
-                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#86efac" }}>
-                                  {cTokSec.toLocaleString()} tok/s
-                                </p>
-                              )}
+                              {cOk && cTokSec > 0 && <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#86efac" }}>{cTokSec.toLocaleString()} tok/s</p>}
+                              <p style={{ margin: "4px 0 0", fontSize: 9, color: "#4ade80" }}>WSE-3 · 900K cores</p>
                             </div>
-                            {/* VS */}
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                              <span style={{ fontSize: 14, fontWeight: 800, color: "#475569" }}>VS</span>
-                              {speedup && (
-                                <span style={{
-                                  fontSize: 16, fontWeight: 800, color: "#fff",
-                                  background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
-                                  borderRadius: 24, padding: "6px 16px",
-                                  boxShadow: "0 4px 14px rgba(99,102,241,0.5)",
-                                  whiteSpace: "nowrap",
-                                }}>
-                                  {speedup}× faster
-                                </span>
-                              )}
-                              {!speedup && cOk && (
-                                <span style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", background: "rgba(34,197,94,0.15)", borderRadius: 20, padding: "4px 12px" }}>
-                                  Cerebras wins
-                                </span>
-                              )}
-                            </div>
-                            {/* OpenAI */}
-                            <div style={{ padding: "20px 16px", borderRadius: 12, background: "rgba(148,163,184,0.06)", border: "1px solid rgba(148,163,184,0.15)", textAlign: "center" }}>
-                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.12em" }}>OpenAI · GPT-4o-mini</p>
-                              {oOk ? (
-                                <>
-                                  <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: "#94a3b8", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                                    {(oMs / 1000).toFixed(2)}s
-                                  </p>
-                                  {oTokSec > 0 && (
-                                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>{oTokSec.toLocaleString()} tok/s</p>
+
+                            {competitors.map((comp, ci) => (
+                              <React.Fragment key={ci}>
+                                {/* VS badge */}
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>VS</span>
+                                  {cOk && comp.ok && (
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80", background: "rgba(34,197,94,0.15)", borderRadius: 12, padding: "2px 8px", whiteSpace: "nowrap" }}>
+                                      {(comp.ms / Math.max(cMs, 1)).toFixed(1)}×
+                                    </span>
                                   )}
-                                  {!oTokSec && (
-                                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>NVIDIA GPU</p>
+                                </div>
+                                {/* Competitor card */}
+                                <div style={{ padding: "20px 14px", borderRadius: 12, background: "rgba(148,163,184,0.06)", border: "1px solid rgba(148,163,184,0.15)", textAlign: "center" }}>
+                                  <p style={{ margin: "0 0 2px", fontSize: 9, fontWeight: 700, color: comp.color, textTransform: "uppercase", letterSpacing: "0.12em" }}>{comp.name} · {comp.model}</p>
+                                  {comp.ok ? (
+                                    <>
+                                      <p style={{ margin: "0 0 4px", fontSize: 32, fontWeight: 800, color: comp.color, fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                                        {(comp.ms / 1000).toFixed(2)}s
+                                      </p>
+                                      {comp.tokSec > 0 && <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#64748b" }}>{comp.tokSec.toLocaleString()} tok/s</p>}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: "#64748b", lineHeight: 1.3 }}>Unavailable</p>
+                                      <p style={{ margin: 0, fontSize: 10, color: "#64748b" }}>{comp.error?.includes("Invalid") || comp.error?.includes("401") ? "Invalid key" : comp.error?.includes("429") ? "Rate limited" : "Error"}</p>
+                                    </>
                                   )}
-                                </>
-                              ) : (
-                                <>
-                                  <p style={{ margin: "0 0 4px", fontSize: 24, fontWeight: 700, color: "#64748b", lineHeight: 1.3 }}>Unavailable</p>
-                                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>
-                                    {speedResult.openai.error?.includes("401") || speedResult.openai.error?.includes("Invalid") ? "Invalid API key" : speedResult.openai.error?.includes("429") ? "Rate limited" : "Connection error"}
-                                  </p>
-                                </>
-                              )}
-                            </div>
+                                  <p style={{ margin: "4px 0 0", fontSize: 9, color: "#64748b" }}>{comp.hw}</p>
+                                </div>
+                              </React.Fragment>
+                            ))}
                           </div>
 
-                          {/* Detailed metrics table */}
-                          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #334155" }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                              <thead>
-                                <tr style={{ background: "rgba(30,41,59,0.8)" }}>
-                                  <th style={{ padding: "10px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Metric</th>
-                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#4ade80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Cerebras (WSE-3)</th>
-                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>OpenAI (NVIDIA GPU)</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {[
-                                  ["Model", "Gemma 4 31B", "GPT-4o-mini"],
-                                  ["Hardware", "WSE-3 · 900K cores · 44GB SRAM", "NVIDIA GPU cluster"],
-                                  ["Response time", cOk ? `${(cMs / 1000).toFixed(2)}s` : "—", oOk ? `${(oMs / 1000).toFixed(2)}s` : "Error"],
-                                  ["Throughput", cTokSec > 0 ? `${cTokSec.toLocaleString()} tok/s` : "—", oTokSec > 0 ? `${oTokSec.toLocaleString()} tok/s` : "—"],
-                                  ["Total tokens", cOk ? `${speedResult.cerebras.tokens}` : "—", oOk ? `${speedResult.openai.completionTokens} (completion)` : "—"],
-                                  ["Completion tokens", cOk && speedResult.cerebras.completionTokens ? `${speedResult.cerebras.completionTokens}` : "—", oOk && speedResult.openai.completionTokens ? `${speedResult.openai.completionTokens}` : "—"],
-                                  ["Inference time (API)", cOk && speedResult.cerebras.completionTime > 0 ? `${(speedResult.cerebras.completionTime * 1000).toFixed(0)}ms` : "—", oOk ? `${oMs}ms (wall)` : "—"],
-                                ].map(([label, cerebras, gemini], i) => (
-                                  <tr key={i} style={{ borderTop: "1px solid #1e293b" }}>
-                                    <td style={{ padding: "8px 14px", color: "#cbd5e1", fontWeight: 500 }}>{label}</td>
-                                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#4ade80", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{cerebras}</td>
-                                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#64748b", fontVariantNumeric: "tabular-nums" }}>{gemini}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-
-                          {/* Response preview */}
-                          {cOk && speedResult.cerebras.content && (
-                            <div>
-                              <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" }}>Cerebras Response Preview</p>
-                              <div style={{ padding: "12px 14px", borderRadius: 8, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)", maxHeight: 120, overflow: "auto" }}>
-                                <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: "#94a3b8", whiteSpace: "pre-wrap" }}>
-                                  {speedResult.cerebras.content.slice(0, 500)}{speedResult.cerebras.content.length > 500 ? "..." : ""}
-                                </p>
-                              </div>
+                          {/* Winner banner */}
+                          {speedup && (
+                            <div style={{ textAlign: "center", padding: "10px", borderRadius: 10, background: "linear-gradient(135deg, rgba(34,197,94,0.1), rgba(59,130,246,0.1))", border: "1px solid rgba(34,197,94,0.2)" }}>
+                              <span style={{ fontSize: 18, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", borderRadius: 24, padding: "6px 20px", boxShadow: "0 4px 14px rgba(99,102,241,0.5)" }}>
+                                🏆 Cerebras wins — {speedup}× faster
+                              </span>
                             </div>
                           )}
 
-                          {/* Bottom explanation */}
+                          {/* Methodology */}
                           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
                             <span style={{ fontSize: 16 }}>🧪</span>
                             <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
-                              <strong style={{ color: "#e2e8f0" }}>Methodology:</strong> Identical prompt sent to both APIs simultaneously via <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>Promise.allSettled()</code>. Cerebras timing uses <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>time_info.completion_time</code> for precise server-side measurement. WSE-3 achieves ~1,850 tok/s on Gemma 4 31B with 4 trillion transistors, 900K cores, and 44GB on-chip SRAM — zero off-chip memory bottleneck. OpenAI runs GPT-4o-mini on NVIDIA GPU clusters with standard HBM memory hierarchy.
+                              <strong style={{ color: "#e2e8f0" }}>Methodology:</strong> Identical prompt sent to all providers simultaneously via <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>Promise.allSettled()</code>. Cerebras WSE-3 achieves ~1,850 tok/s with 44GB on-chip SRAM — zero off-chip memory bottleneck.
                             </p>
                           </div>
 
-                          {/* Re-run button */}
                           <div style={{ textAlign: "center" }}>
                             <button
                               onClick={handleSpeedCompare}
