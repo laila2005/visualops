@@ -656,6 +656,8 @@ export default function VisualOps() {
   const timerRef = useRef(null);
   // Processing history
   const [processHistory, setProcessHistory] = useState([]);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const resultsRef = useRef(null);
 
   const [agentStates, setAgentStates] = useState({
     vision: "idle", research: "idle", risk: "idle", output: "idle",
@@ -714,6 +716,20 @@ export default function VisualOps() {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.5; }
       }
+      @keyframes confettiFall {
+        0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+      }
+      @keyframes confettiPop {
+        0% { transform: scale(0); opacity: 0; }
+        50% { transform: scale(1.2); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      @keyframes successGlow {
+        0% { box-shadow: 0 0 0 rgba(34,197,94,0); }
+        50% { box-shadow: 0 0 40px rgba(34,197,94,0.4); }
+        100% { box-shadow: 0 0 0 rgba(34,197,94,0); }
+      }
     `;
     document.head.appendChild(style);
   }, []);
@@ -765,6 +781,9 @@ export default function VisualOps() {
       setTokensPerSec(res.tokensPerSec);
       setTotalTokens(res.totalTokens);
       setTimeline(res.timeline);
+      // Confetti celebration!
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
       // Add to processing history
       setProcessHistory(prev => [...prev, {
         id: Date.now(),
@@ -906,10 +925,18 @@ export default function VisualOps() {
 
 
   const hasResults = results.output !== null;
+  const hasAnyResults = results.vision !== null || results.research !== null || results.risk !== null || results.output !== null;
   const riskData = results.risk;
   const outputData = results.output;
   const visionData = results.vision;
   const researchData = results.research;
+
+  // Auto-scroll to results as they appear
+  useEffect(() => {
+    if (hasAnyResults && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [results.vision, results.research, results.risk, results.output]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f9fafb", fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
@@ -1135,8 +1162,8 @@ export default function VisualOps() {
         </div>
 
         {/* Right panel — results */}
-        <div>
-          {!hasResults && !running && (
+        <div ref={resultsRef}>
+          {!hasAnyResults && !running && (
             <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 500, gap: 20 }}>
               {/* Hero */}
               <div style={{ textAlign: "center" }}>
@@ -1186,7 +1213,7 @@ export default function VisualOps() {
             </div>
           )}
 
-          {running && !hasResults && (
+          {running && !hasAnyResults && (
             <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 500, gap: 16 }}>
               <div style={{ fontSize: 52, animation: "pulse 1.2s infinite" }}>⚡</div>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Agents Working at Cerebras Speed</h3>
@@ -1223,8 +1250,68 @@ export default function VisualOps() {
             </div>
           )}
 
-          {hasResults && (
+          {hasAnyResults && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Confetti Celebration */}
+              {showConfetti && (
+                <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", zIndex: 9999, overflow: "hidden" }}>
+                  {Array.from({ length: 50 }).map((_, i) => (
+                    <div key={i} style={{
+                      position: "absolute",
+                      left: `${Math.random() * 100}%`,
+                      top: `-${Math.random() * 20}px`,
+                      width: `${6 + Math.random() * 8}px`,
+                      height: `${6 + Math.random() * 8}px`,
+                      borderRadius: Math.random() > 0.5 ? "50%" : "2px",
+                      background: ["#3b82f6", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#ec4899"][Math.floor(Math.random() * 6)],
+                      animation: `confettiFall ${2 + Math.random() * 2}s ease-out ${Math.random() * 0.5}s forwards`,
+                    }} />
+                  ))}
+                </div>
+              )}
+
+              {/* Completion banner */}
+              {hasResults && !running && (
+                <div style={{
+                  background: "linear-gradient(135deg, #f0fdf4, #ecfdf5)",
+                  border: "1px solid #86efac", borderRadius: 12, padding: "16px 20px",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  animation: showConfetti ? "successGlow 2s ease-out" : "none",
+                }}>
+                  <div>
+                    <p style={{ margin: "0 0 2px", fontSize: 16, fontWeight: 800, color: "#15803d" }}>
+                      ✅ Pipeline Complete — {elapsed}s
+                    </p>
+                    <p style={{ margin: 0, fontSize: 12, color: "#16a34a" }}>
+                      Manual onboarding: ~30 min → VisualOps: {elapsed}s — <strong>{elapsed ? Math.round(1800 / parseFloat(elapsed)) : "~"}× faster</strong>
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <span style={{ padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "#fff" }}>
+                      {tokensPerSec?.toLocaleString()} tok/s
+                    </span>
+                    <span style={{ padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>
+                      {totalTokens?.toLocaleString()} tokens
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Still processing indicator */}
+              {running && hasAnyResults && !hasResults && (
+                <div style={{
+                  background: "linear-gradient(135deg, #eff6ff, #dbeafe)",
+                  border: "1px solid #93c5fd", borderRadius: 12, padding: "14px 20px",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <div style={{ fontSize: 20, animation: "pulse 1s infinite" }}>⚡</div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>Building results in real-time...</p>
+                    <p style={{ margin: 0, fontSize: 11, color: "#3b82f6" }}>{liveElapsed}s elapsed · agents completing as you watch</p>
+                  </div>
+                </div>
+              )}
 
                 {/* Vision Extraction Preview */}
                 {visionData && (
