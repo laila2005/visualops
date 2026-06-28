@@ -652,6 +652,8 @@ export default function VisualOps() {
   const [speedResult, setSpeedResult] = useState(null);
   const [speedRunning, setSpeedRunning] = useState(false);
   const [speedError, setSpeedError] = useState(null);
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const timerRef = useRef(null);
 
   const [agentStates, setAgentStates] = useState({
     vision: "idle", research: "idle", risk: "idle", output: "idle",
@@ -713,6 +715,20 @@ export default function VisualOps() {
     `;
     document.head.appendChild(style);
   }, []);
+
+  // Live elapsed timer
+  useEffect(() => {
+    if (running) {
+      const start = Date.now();
+      setLiveElapsed(0);
+      timerRef.current = setInterval(() => {
+        setLiveElapsed(((Date.now() - start) / 1000).toFixed(1));
+      }, 100);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [running]);
 
   const handleFile = (f) => {
     if (!f || !f.type.startsWith("image/")) return;
@@ -828,6 +844,14 @@ export default function VisualOps() {
     }
     md += `---\n\n*Generated at ${new Date().toISOString()} by VisualOps*\n`;
     return md;
+  };
+
+  const [copied, setCopied] = useState(null);
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    });
   };
 
   const downloadPackage = () => {
@@ -1155,7 +1179,11 @@ export default function VisualOps() {
             <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 500, gap: 16 }}>
               <div style={{ fontSize: 52, animation: "pulse 1.2s infinite" }}>⚡</div>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Agents Working at Cerebras Speed</h3>
-              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>~1,850 tokens/sec · Gemma 4 31B on WSE-3</p>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 32, fontWeight: 800, color: "#3b82f6", fontVariantNumeric: "tabular-nums", fontFamily: "'Inter', monospace" }}>{liveElapsed}s</span>
+                <span style={{ fontSize: 13, color: "#6b7280" }}>elapsed</span>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: "#9ca3af" }}>~1,850 tokens/sec · Gemma 4 31B on WSE-3</p>
 
               {/* Live agent status */}
               <div style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
@@ -1186,6 +1214,32 @@ export default function VisualOps() {
 
           {hasResults && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                {/* Vision Extraction Preview */}
+                {visionData && (
+                  <Card style={{ background: "linear-gradient(135deg, #fefce8, #fef9c3)", border: "1px solid #fde68a" }}>
+                    <Section title="👁 Vision Agent — Extracted from Image (Multimodal)">
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                        {[
+                          ["Company", visionData.company_name],
+                          ["Industry", visionData.industry],
+                          ["Document Type", visionData.document_type],
+                          ["Deal Value", visionData.deal_value],
+                          ["Contract Duration", visionData.contract_duration],
+                          ["Key Contacts", Array.isArray(visionData.key_contacts) ? visionData.key_contacts.join(", ") : visionData.key_contacts],
+                        ].filter(([, v]) => v).map(([label, value], i) => (
+                          <div key={i} style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.7)" }}>
+                            <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 600, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</p>
+                            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#78350f" }}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <p style={{ margin: "10px 0 0", fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                        ↑ All data extracted directly from the uploaded image by Gemma 4 31B's vision capabilities — no OCR pipeline needed
+                      </p>
+                    </Section>
+                  </Card>
+                )}
 
               {/* Toolbar */}
               <div className="card-animate" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1241,6 +1295,16 @@ export default function VisualOps() {
                 <Card>
                   <Section title="Executive summary">
                     <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: "#374151" }}>{outputData.executive_summary}</p>
+                    <button
+                      onClick={() => copyToClipboard(outputData.executive_summary, 'summary')}
+                      style={{
+                        fontSize: 11, color: copied === 'summary' ? '#059669' : '#6b7280',
+                        background: 'none', border: '1px solid #e5e7eb', borderRadius: 6,
+                        padding: '3px 10px', cursor: 'pointer', transition: 'all 0.2s', marginTop: 8,
+                      }}
+                    >
+                      {copied === 'summary' ? '✓ Copied!' : '📋 Copy'}
+                    </button>
                   </Section>
                   {visionData?.company_name && (
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1342,10 +1406,14 @@ export default function VisualOps() {
                       <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: "#374151", whiteSpace: "pre-wrap" }}>{outputData.welcome_email.body}</p>
                     </div>
                     <button
-                      onClick={() => navigator.clipboard.writeText(`Subject: ${outputData.welcome_email.subject}\n\n${outputData.welcome_email.body}`)}
-                      style={{ marginTop: 10, fontSize: 12, color: "#1d4ed8", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                      onClick={() => copyToClipboard(`Subject: ${outputData.welcome_email.subject}\n\n${outputData.welcome_email.body}`, 'email')}
+                      style={{
+                        fontSize: 11, color: copied === 'email' ? '#059669' : '#6b7280',
+                        background: 'none', border: '1px solid #e5e7eb', borderRadius: 6,
+                        padding: '3px 10px', cursor: 'pointer', transition: 'all 0.2s', marginTop: 10,
+                      }}
                     >
-                      Copy email →
+                      {copied === 'email' ? '✓ Copied!' : '📋 Copy email'}
                     </button>
                   </Section>
                 </Card>
@@ -1402,6 +1470,33 @@ export default function VisualOps() {
                         <p style={{ margin: 0, fontSize: 13, color: "#1d4ed8" }}><strong>Recommended approach:</strong> {researchData.recommended_approach}</p>
                       </div>
                     )}
+                  </Section>
+                </Card>
+              )}
+
+              {/* ─── Pipeline Performance Stats ─────────────────── */}
+              {elapsed && (
+                <Card style={{ background: "linear-gradient(135deg, #f0f9ff, #eff6ff)", border: "1px solid #bfdbfe" }}>
+                  <Section title="📊 Pipeline Performance">
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                      {[
+                        { label: "Total Time", value: `${elapsed}s`, sub: "4 agents" },
+                        { label: "Throughput", value: tokensPerSec ? `${tokensPerSec.toLocaleString()}` : "—", sub: "tok/s" },
+                        { label: "Total Tokens", value: totalTokens ? totalTokens.toLocaleString() : "—", sub: "processed" },
+                        { label: "Parallel Savings", value: timings.research && timings.risk ? `${Math.min(parseFloat(timings.research?.ms || 0), parseFloat(timings.risk?.ms || 0))}ms` : "~50%", sub: "saved" },
+                      ].map((stat, i) => (
+                        <div key={i} style={{ padding: "12px", borderRadius: 10, background: "rgba(255,255,255,0.8)", textAlign: "center" }}>
+                          <p style={{ margin: "0 0 2px", fontSize: 22, fontWeight: 800, color: "#1d4ed8", fontVariantNumeric: "tabular-nums" }}>{stat.value}</p>
+                          <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: "#3b82f6" }}>{stat.label}</p>
+                          <p style={{ margin: 0, fontSize: 10, color: "#93c5fd" }}>{stat.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "rgba(29,78,216,0.06)", border: "1px solid rgba(29,78,216,0.1)" }}>
+                      <p style={{ margin: 0, fontSize: 11, color: "#1d4ed8", lineHeight: 1.5 }}>
+                        <strong>Why speed matters:</strong> Traditional document analysis takes 15-30 minutes per document with manual review. VisualOps processes the same document in {elapsed}s — enabling real-time onboarding at enterprise scale. Cerebras WSE-3's ~1,850 tok/s makes 4-agent orchestration feel instant.
+                      </p>
+                    </div>
                   </Section>
                 </Card>
               )}
