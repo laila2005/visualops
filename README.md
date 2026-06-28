@@ -1,4 +1,4 @@
-# VisualOps — 4-Agent B2B Onboarding Intelligence
+# VisualOps — 5-Agent B2B Onboarding Intelligence
 
 **Gemma 4 31B on Cerebras WSE-3 · ~1,850 tok/s · Built for the Cerebras × Google DeepMind Gemma 4 Hackathon**
 
@@ -6,15 +6,15 @@
 
 ## What is VisualOps?
 
-VisualOps transforms any business document image (contracts, proposals, invoices, org charts) into a complete client onboarding package in under 5 seconds — powered by 4 AI agents running Gemma 4 31B on Cerebras.
+VisualOps transforms any business document image (contracts, proposals, invoices, org charts) into a complete client onboarding package in seconds — powered by 5 AI agents running Gemma 4 31B on Cerebras, including multimodal vision, parallel execution, reasoning mode, live token streaming, and real tool calling.
 
-**Upload a document → 4 agents analyze it → Get a complete onboarding package.**
+**Upload a document → 5 agents analyze it → Get a complete onboarding package + a GO/HOLD/ESCALATE deal verdict.**
 
 No manual data entry. No waiting. Just instant, intelligent onboarding.
 
 ---
 
-## Architecture: 4 Agents, 2 Running in Parallel
+## Architecture: 5 Agents, Parallel Execution + Tool Calling
 
 ```
 User uploads document image
@@ -35,14 +35,18 @@ User uploads document image
 └────┬─────┘ └─────┬──────┘
      └──────┬──────┘
             ▼
-┌──────────────────────┐
-│  Agent 4: Output     │  ← Synthesizes everything into:
-│  Package Generator   │    • Executive summary
-│  Structured Outputs  │    • Onboarding plan (step-by-step)
-│                      │    • Welcome email draft
-│                      │    • Action checklist
-│                      │    • Success metrics
-└──────────────────────┘
+     ┌──────┴───────┐  ← Promise.all() — Output + Strategist in PARALLEL
+     ▼              ▼
+┌──────────────┐ ┌──────────────────────┐
+│  Agent 4:    │ │  Agent 5: Strategist │  ← Tool calling (strict schemas)
+│  Output      │ │  Deal Reconciler     │    calls compute_deal_score()
+│  Synthesizes:│ │  Reconciles opp vs   │    and flag_for_human(), then
+│  • Exec summ │ │  risk → GO / HOLD /  │    emits a verdict + 0-100 score
+│  • Plan      │ │  ESCALATE verdict    │
+│  • Email     │ └──────────────────────┘
+│  • Checklist │
+│  • Metrics   │  + a final streamed Executive Briefing (live token streaming)
+└──────────────┘
 ```
 
 ---
@@ -50,9 +54,18 @@ User uploads document image
 ## Key Technical Features
 
 ### 🤖 Multi-Agent Collaboration
-- 4 specialized agents with distinct roles and prompts
-- Agents 2 (Research) and 3 (Risk) run **in parallel** via `Promise.all()`
-- Execution timeline visualization proves concurrent operation
+- 5 specialized agents with distinct roles and prompts
+- Two parallel stages via `Promise.all()`: Research ∥ Risk, then Output ∥ Strategist
+- Execution timeline + live agent communication log prove concurrent operation
+
+### 🛠️ Tool Calling (Agentic Reconciliation)
+- Agent 5 (Deal Strategist) runs a real **tool-calling loop** with strict function schemas (`strict: true`)
+- Calls `compute_deal_score(opportunity, risk)` and `flag_for_human(reason)` — executed locally, results fed back to the model
+- Reconciles the Research (opportunity) and Risk (threat) agents into a GO / HOLD / ESCALATE verdict with a 0-100 deal score
+- Every tool call is shown live — autonomous agent ↔ tool coordination, not a prompt chain
+
+### ✍️ Live Token Streaming
+- A final Executive Briefing is **streamed token-by-token** (SSE) so Cerebras' ~1,850 tok/s is visible on screen as the text types in
 
 ### 🖼️ Multimodal Intelligence
 - Agent 1 (Vision) reads document **images directly** using Gemma 4's multimodal capabilities
@@ -114,7 +127,7 @@ npm run dev
 1. Enter your Cerebras API key (`csk-...`)
 2. (Optional) Enter your OpenAI API key (`sk-...`) for speed comparison
 3. Upload a business document image
-4. Click "Run 4-agent pipeline"
+4. Click "Run 5-agent pipeline"
 5. Review results and download the onboarding package (.md)
 
 ---
@@ -127,8 +140,10 @@ npm run dev
 | AI Model | Gemma 4 31B on Cerebras |
 | API | OpenAI-compatible Chat Completions |
 | Structured Output | JSON Schema with `strict: true` |
+| Tool Calling | Strict function schemas (`compute_deal_score`, `flag_for_human`) |
+| Streaming | SSE token streaming for the live Executive Briefing |
 | Reasoning | `reasoning_effort: "low"` on Risk agent |
-| Speed Comparison | OpenAI GPT-4o-mini (NVIDIA GPU baseline) |
+| Speed Comparison | OpenAI GPT-4o-mini (GPU) + Gemini 2.0 Flash (TPU) |
 | Deployment | Single-file architecture (`src/App.jsx`) |
 
 ---
@@ -136,10 +151,11 @@ npm run dev
 ## Hackathon Tracks
 
 ### Track 1: Multiverse Agents ($2K)
-- ✅ 4 agents with distinct roles collaborating on a shared task
+- ✅ 5 agents with distinct roles collaborating on a shared task
 - ✅ Multimodal: Vision agent reads document images directly
-- ✅ Parallel execution proven via execution timeline
-- ✅ Live speed comparison against GPU provider
+- ✅ Parallel execution proven via execution timeline (two parallel stages)
+- ✅ Real tool calling: Deal Strategist reconciles agents via `compute_deal_score` / `flag_for_human`
+- ✅ Live token streaming + side-by-side speed comparison vs GPU & TPU
 
 ### Track 3: Enterprise Impact ($1K)
 - ✅ Solves real enterprise B2B onboarding challenge
