@@ -116,7 +116,9 @@ async function callOpenAI(openaiKey, prompt) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`OpenAI API error ${res.status}: ${body.slice(0, 300)}`);
+    if (res.status === 401) throw new Error("Invalid OpenAI API key — check your key and try again");
+    if (res.status === 429) throw new Error("OpenAI rate limit — wait a moment and retry");
+    throw new Error(`OpenAI error ${res.status}: ${body.slice(0, 200)}`);
   }
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content || "";
@@ -1719,17 +1721,25 @@ export default function VisualOps() {
                             {/* OpenAI */}
                             <div style={{ padding: "20px 16px", borderRadius: 12, background: "rgba(148,163,184,0.06)", border: "1px solid rgba(148,163,184,0.15)", textAlign: "center" }}>
                               <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.12em" }}>OpenAI · GPT-4o-mini</p>
-                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: oOk ? "#94a3b8" : "#f87171", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                                {oOk ? `${(oMs / 1000).toFixed(2)}s` : "Failed"}
-                              </p>
-                              {oOk && oTokSec > 0 && (
-                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>{oTokSec.toLocaleString()} tok/s</p>
-                              )}
-                              {oOk && !oTokSec && (
-                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>NVIDIA GPU</p>
-                              )}
-                              {!oOk && (
-                                <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{speedResult.openai.error?.slice(0, 60)}</p>
+                              {oOk ? (
+                                <>
+                                  <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: "#94a3b8", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                                    {(oMs / 1000).toFixed(2)}s
+                                  </p>
+                                  {oTokSec > 0 && (
+                                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>{oTokSec.toLocaleString()} tok/s</p>
+                                  )}
+                                  {!oTokSec && (
+                                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>NVIDIA GPU</p>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <p style={{ margin: "0 0 4px", fontSize: 24, fontWeight: 700, color: "#64748b", lineHeight: 1.3 }}>Unavailable</p>
+                                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>
+                                    {speedResult.openai.error?.includes("401") || speedResult.openai.error?.includes("Invalid") ? "Invalid API key" : speedResult.openai.error?.includes("429") ? "Rate limited" : "Connection error"}
+                                  </p>
+                                </>
                               )}
                             </div>
                           </div>
