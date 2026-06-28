@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VisualOps — Sample Test Documents</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e5e7eb; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: #1f2937; }
+  .bar {
+    position: sticky; top: 0; z-index: 10; background: #111827; color: #fff;
+    padding: 12px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  .bar b { font-size: 14px; margin-right: 8px; }
+  .bar button {
+    background: #374151; color: #fff; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer; transition: background .15s;
+  }
+  .bar button:hover { background: #4b5563; }
+  .bar button.active { background: #2563eb; }
+  .bar .hint { margin-left: auto; font-size: 12px; color: #9ca3af; }
+  .stage { display: flex; justify-content: center; padding: 28px 16px 60px; }
+  .page {
+    display: none; background: #fff; width: 780px; max-width: 100%;
+    padding: 56px 60px; box-shadow: 0 6px 24px rgba(0,0,0,.18); border-radius: 2px;
+  }
+  .page.show { display: block; }
+
+  /* Document typography */
+  .doc-serif { font-family: Georgia, "Times New Roman", serif; }
+  .lh { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }
+  .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo span { color: #2563eb; }
+  .muted { color: #6b7280; }
+  .small { font-size: 13px; }
+  h1.title { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: #2563eb; margin: 28px 0 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #e5e7eb; }
+  th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+  .right { text-align: right; }
+  .total-row td { font-weight: 700; font-size: 15px; border-top: 2px solid #111827; border-bottom: none; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9ca3af; margin-bottom: 2px; }
+  .field-val { font-size: 14px; font-weight: 600; }
+  .big-amount { font-size: 30px; font-weight: 800; color: #15803d; }
+  .clause { font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
+  .sigrow { display: flex; justify-content: space-between; margin-top: 40px; }
+  .sigbox { width: 45%; }
+  .sigline { border-top: 1px solid #111827; margin-top: 36px; padding-top: 4px; font-size: 12px; color: #6b7280; }
+  .footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; text-align: center; }
+
+  /* Org chart */
+  .org { text-align: center; }
+  .node { display: inline-block; background: #f9fafb; border: 2px solid #2563eb; border-radius: 8px; padding: 10px 16px; margin: 6px; min-width: 150px; }
+  .node .nm { font-weight: 700; font-size: 14px; }
+  .node .rl { font-size: 12px; color: #6b7280; }
+  .org-row { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; margin: 8px 0; }
+  .org-line { width: 2px; height: 20px; background: #cbd5e1; margin: 0 auto; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <b>📄 VisualOps Sample Documents</b>
+    <button data-doc="proposal" class="active">SaaS Proposal</button>
+    <button data-doc="invoice">Invoice</button>
+    <button data-doc="contract">Service Agreement (risk-heavy)</button>
+    <button data-doc="org">Org Chart</button>
+    <button id="download" style="background:#16a34a;margin-left:8px">⬇ Download as PNG</button>
+    <button id="downloadAll" style="background:#2563eb">⬇ Download all 4</button>
+    <span class="hint">All fictional. Download → upload to VisualOps.</span>
+  </div>
+
+  <div class="stage">
+
+    <!-- ============ PROPOSAL ============ -->
+    <div class="page show doc-serif" id="proposal">
+      <div class="lh">
+        <div>
+          <div class="logo">Bright<span>wave</span> Retail Group</div>
+          <div class="muted small">2400 Market Street, Suite 1100 · Philadelphia, PA 19103</div>
+        </div>
+        <div class="right small muted">
+          Proposal #BW-2026-0418<br>Issued: June 18, 2026<br>Valid through: July 31, 2026
+        </div>
+      </div>
+
+      <h1 class="title">Inventory Automation Platform — Proposal</h1>
+      <p class="muted small">Prepared for Brightwave Retail Group by Apex Cloud Services</p>
+
+      <h2>Engagement Summary</h2>
+      <p class="clause">Brightwave Retail Group is seeking a unified inventory automation platform to replace its
+      legacy spreadsheet-based stock tracking across 42 retail locations. This proposal covers implementation,
+      data migration, and 24 months of managed support for the Apex Inventory Cloud suite.</p>
+
+      <h2>Primary Contacts</h2>
+      <div class="grid2">
+        <div><div class="field-label">Client Sponsor</div><div class="field-val">Sarah Chen — VP of Operations</div><div class="small muted">s.chen@brightwave-retail.com</div></div>
+        <div><div class="field-label">Technical Lead</div><div class="field-val">Marcus Webb — Chief Technology Officer</div><div class="small muted">m.webb@brightwave-retail.com</div></div>
+      </div>
+
+      <h2>Scope & Pricing</h2>
+      <table>
+        <tr><th>Module</th><th>Description</th><th class="right">Annual</th></tr>
+        <tr><td>Inventory Core</td><td>Real-time stock sync across 42 stores</td><td class="right">$72,000</td></tr>
+        <tr><td>Demand Forecasting</td><td>AI reorder recommendations</td><td class="right">$48,000</td></tr>
+        <tr><td>Managed Support</td><td>Dedicated CSM, 99.9% SLA</td><td class="right">$24,000</td></tr>
+        <tr class="total-row"><td colspan="2">Total Contract Value (per year)</td><td class="right">$144,000</td></tr>
+      </table>
+
+      <h2>Key Terms</h2>
+      <p class="clause">• Term: 24 months, commencing August 1, 2026 &nbsp; • Billing: Annual, Net-30 &nbsp;
+      • Auto-renewal: 12-month terms unless cancelled 60 days prior &nbsp; • Implementation: 6–8 weeks</p>
+
+      <div class="footer">Brightwave Retail Group · Confidential · This proposal is fictional sample data for testing.</div>
+    </div>
+
+    <!-- ============ INVOICE ============ -->
+    <div class="page" id="invoice">
+      <div class="lh">
+        <div>
+          <div class="logo">Apex<span>Cloud</span> Services</div>
+          <div class="muted small">billing@apexcloud.io · (415) 555-0192</div>
+        </div>
+        <div class="right">
+          <h1 class="title" style="color:#2563eb">INVOICE</h1>
+          <div class="small muted">#INV-2026-0842</div>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-bottom:18px">
+        <div><div class="field-label">Bill To</div><div class="field-val">Northwind Logistics LLC</div><div class="small muted">Attn: David Okafor, Procurement Director<br>880 Harbor Blvd, Long Beach, CA 90802</div></div>
+        <div class="right">
+          <div class="field-label">Invoice Date</div><div class="field-val">June 25, 2026</div>
+          <div class="field-label" style="margin-top:8px">Due Date</div><div class="field-val" style="color:#dc2626">July 25, 2026</div>
+        </div>
+      </div>
+
+      <table>
+        <tr><th>Item</th><th class="right">Qty</th><th class="right">Unit</th><th class="right">Amount</th></tr>
+        <tr><td>Fleet Tracking Licenses (annual)</td><td class="right">120</td><td class="right">$180</td><td class="right">$21,600</td></tr>
+        <tr><td>Onboarding & Setup</td><td class="right">1</td><td class="right">$4,500</td><td class="right">$4,500</td></tr>
+        <tr><td>Premium Support Tier</td><td class="right">1</td><td class="right">$2,400</td><td class="right">$2,400</td></tr>
+        <tr><td class="right" colspan="3">Subtotal</td><td class="right">$28,500</td></tr>
+        <tr><td class="right" colspan="3">Tax (0%)</td><td class="right">$0.00</td></tr>
+        <tr class="total-row"><td colspan="3">Total Due</td><td class="right">$28,500.00</td></tr>
+      </table>
+
+      <p class="small muted" style="margin-top:18px">Payment terms: Net-30. Remit to Apex Cloud Services, Account #8842-013.
+      Late payments accrue 1.5% monthly interest.</p>
+
+      <div class="footer">Apex Cloud Services · Fictional sample invoice for testing.</div>
+    </div>
+
+    <!-- ============ CONTRACT (risk-heavy) ============ -->
+    <div class="page doc-serif" id="contract">
+      <div class="lh">
+        <div>
+          <div class="logo">Vertex <span>Consulting</span> Partners</div>
+          <div class="muted small">Master Services Agreement</div>
+        </div>
+        <div class="right small muted">Agreement #MSA-771<br>Draft — June 2026</div>
+      </div>
+
+      <h1 class="title">Master Services Agreement</h1>
+      <p class="muted small">Between Vertex Consulting Partners ("Provider") and Summit Health Systems ("Client")</p>
+
+      <h2>1. Term & Renewal</h2>
+      <p class="clause">This Agreement commences on the Effective Date and continues for thirty-six (36) months. The Agreement
+      shall <b>automatically renew for successive 36-month terms</b> unless either party provides written notice no fewer
+      than ninety (90) days prior to expiration.</p>
+
+      <h2>2. Liability</h2>
+      <p class="clause">Client agrees that Provider's liability shall be <b>unlimited</b> with respect to data handling, and
+      Client shall indemnify Provider against all claims arising from use of the deliverables, including third-party claims.</p>
+
+      <h2>3. Data & Compliance</h2>
+      <p class="clause">Provider will process Client patient records. <b>No specific HIPAA Business Associate Agreement is
+      attached.</b> Data residency and breach-notification timelines are to be determined.</p>
+
+      <h2>4. Payment</h2>
+      <p class="clause">Total engagement value: $310,000, invoiced 100% in advance upon signing. <b>No refund</b> provisions
+      apply. Termination for convenience is <b>not permitted</b>.</p>
+
+      <h2>5. Signatures</h2>
+      <div class="sigrow">
+        <div class="sigbox"><div class="sigline">Provider — Vertex Consulting Partners</div></div>
+        <div class="sigbox"><div class="sigline">Client — Summit Health Systems (UNSIGNED)</div></div>
+      </div>
+
+      <div class="footer">Fictional sample agreement — intentionally contains red flags for testing the Risk agent.</div>
+    </div>
+
+    <!-- ============ ORG CHART ============ -->
+    <div class="page" id="org">
+      <div class="lh">
+        <div><div class="logo">Meridian <span>Software</span> Inc.</div><div class="muted small">Organizational Structure — 2026</div></div>
+        <div class="right small muted">~340 employees · Austin, TX</div>
+      </div>
+
+      <div class="org">
+        <div class="node"><div class="nm">Elena Vasquez</div><div class="rl">Chief Executive Officer</div></div>
+        <div class="org-line"></div>
+        <div class="org-row">
+          <div class="node"><div class="nm">Raj Patel</div><div class="rl">VP Engineering</div></div>
+          <div class="node"><div class="nm">Karen Lindqvist</div><div class="rl">VP Sales</div></div>
+          <div class="node"><div class="nm">Tom Becker</div><div class="rl">CFO</div></div>
+        </div>
+        <div class="org-line"></div>
+        <div class="org-row">
+          <div class="node"><div class="nm">Priya Nair</div><div class="rl">Eng. Manager, Platform</div></div>
+          <div class="node"><div class="nm">Luis Romero</div><div class="rl">Eng. Manager, Mobile</div></div>
+          <div class="node"><div class="nm">Grace Kim</div><div class="rl">Director, Enterprise Sales</div></div>
+          <div class="node"><div class="nm">Sam Idris</div><div class="rl">Controller</div></div>
+        </div>
+      </div>
+
+      <div class="footer">Meridian Software Inc. · Fictional org chart for testing.</div>
+    </div>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script>
+    const buttons = document.querySelectorAll('.bar button[data-doc]');
+    const pages = document.querySelectorAll('.page');
+
+    function showDoc(id) {
+      buttons.forEach(x => x.classList.toggle('active', x.dataset.doc === id));
+      pages.forEach(p => p.classList.toggle('show', p.id === id));
+    }
+
+    buttons.forEach(b => b.addEventListener('click', () => {
+      showDoc(b.dataset.doc);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }));
+
+    // Render one .page element to a PNG and trigger a download.
+    async function downloadDoc(id) {
+      const el = document.getElementById(id);
+      const wasHidden = !el.classList.contains('show');
+      if (wasHidden) el.style.display = 'block';      // must be visible for html2canvas
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+      if (wasHidden) el.style.display = '';
+      const link = document.createElement('a');
+      link.download = 'visualops-' + id + '.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    document.getElementById('download').addEventListener('click', () => {
+      const current = document.querySelector('.page.show');
+      if (current) downloadDoc(current.id);
+    });
+
+    document.getElementById('downloadAll').addEventListener('click', async () => {
+      for (const p of pages) {
+        await downloadDoc(p.id);
+        await new Promise(r => setTimeout(r, 400)); // small gap so the browser queues each file
+      }
+    });
+  </script>
+</body>
+</html>

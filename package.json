@@ -1,0 +1,18 @@
+{
+  "name": "visualops",
+  "version": "1.0.0",
+  "description": "4-agent B2B onboarding intelligence powered by Gemma 4 on Cerebras",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^5.0.0"
+  }
+}
