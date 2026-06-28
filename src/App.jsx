@@ -1779,7 +1779,7 @@ export default function VisualOps() {
                             </div>
 
                             {competitors.map((comp, ci) => (
-                              <React.Fragment key={ci}>
+                              <div key={ci} style={{ display: "contents" }}>
                                 {/* VS badge */}
                                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                                   <span style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>VS</span>
@@ -1807,7 +1807,7 @@ export default function VisualOps() {
                                   )}
                                   <p style={{ margin: "4px 0 0", fontSize: 9, color: "#64748b" }}>{comp.hw}</p>
                                 </div>
-                              </React.Fragment>
+                              </div>
                             ))}
                           </div>
 
