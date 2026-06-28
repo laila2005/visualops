@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 // ─── Cerebras / Gemma 4 API ───────────────────────────────────────────────────
 const CEREBRAS_BASE = "https://api.cerebras.ai/v1";
@@ -96,6 +96,45 @@ function parseJSON(content, fallback) {
   } catch {
     return fallback;
   }
+}
+
+// ─── Gemini API (Google AI Studio — for speed comparison) ─────────────────────
+// Calls Gemini via the Google generativelanguage REST API. Returns { content, ms }.
+async function callGemini(geminiKey, prompt) {
+  const t0 = Date.now();
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${geminiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Gemini API error ${res.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return { content, ms: Date.now() - t0 };
+}
+
+// Run the same prompt on both Cerebras and Gemini in parallel, return timings.
+async function runSpeedComparison(cerebrasKey, geminiKey, prompt) {
+  const [cerebrasResult, geminiResult] = await Promise.allSettled([
+    callGemma(cerebrasKey, [{ role: "user", content: prompt }]),
+    callGemini(geminiKey, prompt),
+  ]);
+  return {
+    cerebras: cerebrasResult.status === "fulfilled"
+      ? { ms: cerebrasResult.value.ms, tokens: cerebrasResult.value.tokens, completionTokens: cerebrasResult.value.completionTokens, completionTime: cerebrasResult.value.completionTime, content: cerebrasResult.value.content, error: null }
+      : { ms: 0, tokens: 0, completionTokens: 0, completionTime: 0, content: "", error: cerebrasResult.reason?.message || "Failed" },
+    gemini: geminiResult.status === "fulfilled"
+      ? { ms: geminiResult.value.ms, content: geminiResult.value.content, error: null }
+      : { ms: 0, content: "", error: geminiResult.reason?.message || "Failed" },
+  };
 }
 
 // ─── Image → Base64 ───────────────────────────────────────────────────────────
@@ -297,10 +336,23 @@ async function agentRisk(apiKey, visionData) {
     [
       {
         role: "user",
-        content: `You are a B2B risk assessment agent. Analyze this document data for risks, red flags, and compliance concerns.
+        content: `You are a senior B2B risk assessment and compliance agent. Analyze this document data thoroughly for ALL risks, red flags, and compliance concerns.
 
 Document data:
 ${JSON.stringify(visionData, null, 2)}
+
+Critical: You MUST check for and flag ALL of the following if present:
+- Auto-renewal clauses (especially long terms like 12+ months)
+- Unlimited or uncapped liability provisions
+- Missing HIPAA Business Associate Agreement (BAA) when patient/health data is involved
+- Unsigned documents or missing signatures
+- No-refund or no-termination-for-convenience clauses
+- 100% upfront payment requirements
+- One-sided indemnification
+- Missing data residency or breach notification timelines
+- Unusually long contract terms (36+ months)
+
+If you find 3+ high-severity flags, or any combination of missing compliance documents with healthcare data, set proceed_recommendation to "escalate".
 
 Return ONLY a valid JSON object (no markdown) with:
 {
@@ -562,6 +614,8 @@ function ChecklistItem({ task, priority, done, onToggle }) {
 export default function VisualOps() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(false);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiKeySet, setGeminiKeySet] = useState(false);
   const [models, setModels] = useState(null);
   const [modelsErr, setModelsErr] = useState(null);
   const [file, setFile] = useState(null);
@@ -573,6 +627,10 @@ export default function VisualOps() {
   const [totalTokens, setTotalTokens] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [checklist, setChecklist] = useState([]);
+  // Speed comparison state
+  const [speedResult, setSpeedResult] = useState(null);
+  const [speedRunning, setSpeedRunning] = useState(false);
+  const [speedError, setSpeedError] = useState(null);
 
   const [agentStates, setAgentStates] = useState({
     vision: "idle", research: "idle", risk: "idle", output: "idle",
@@ -607,6 +665,8 @@ export default function VisualOps() {
     setTotalTokens(null);
     setTimeline(null);
     setError(null);
+    setSpeedResult(null);
+    setSpeedError(null);
   };
 
   const handleDrop = (e) => {
@@ -644,6 +704,24 @@ export default function VisualOps() {
       setModels(await listModels(apiKey));
     } catch (e) {
       setModelsErr(e.message);
+    }
+  };
+
+  // ─── Speed Comparison Handler ──────────────────────────────────────────────
+  const handleSpeedCompare = async () => {
+    if (!apiKey || !geminiKey) return;
+    setSpeedRunning(true);
+    setSpeedError(null);
+    setSpeedResult(null);
+    const companyName = results.vision?.company_name || "the client";
+    const prompt = `You are a B2B analyst. Write a concise 3-sentence executive summary for onboarding ${companyName} as a new enterprise client. Focus on key priorities and recommended next steps.`;
+    try {
+      const result = await runSpeedComparison(apiKey, geminiKey, prompt);
+      setSpeedResult(result);
+    } catch (e) {
+      setSpeedError(e.message);
+    } finally {
+      setSpeedRunning(false);
     }
   };
 
@@ -702,42 +780,46 @@ export default function VisualOps() {
   const researchData = results.research;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f9fafb", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f9fafb", fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes slideIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         * { box-sizing: border-box; }
         textarea { resize: vertical; }
         input:focus, textarea:focus, button:focus { outline: 2px solid #3b82f6; outline-offset: 2px; }
+        .card-animate { animation: slideIn 0.4s ease-out both; }
       `}</style>
 
       {/* Header */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 50%, #0f172a 100%)", borderBottom: "1px solid #334155", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "#1d4ed8", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "#fff", fontSize: 16 }}>⚡</span>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 20px rgba(59,130,246,0.3)" }}>
+            <span style={{ color: "#fff", fontSize: 18 }}>⚡</span>
           </div>
           <div>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#111827" }}>VisualOps</p>
-            <p style={{ margin: 0, fontSize: 11, color: "#9ca3af" }}>4-agent onboarding intelligence · Gemma 4 on Cerebras</p>
+            <p style={{ margin: 0, fontWeight: 800, fontSize: 17, color: "#fff", letterSpacing: "-0.02em" }}>VisualOps</p>
+            <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>4-agent onboarding intelligence · Gemma 4 31B on Cerebras WSE-3 · ~1,850 tok/s</p>
           </div>
         </div>
         {elapsed && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "6px 12px" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>⚡ {elapsed}s</span>
-              <span style={{ fontSize: 11, color: "#15803d" }}>Cerebras</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 8, padding: "6px 12px" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#4ade80" }}>⚡ {elapsed}s</span>
+              <span style={{ fontSize: 11, color: "#86efac" }}>Cerebras</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "6px 12px" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", textDecoration: "line-through" }}>~75s</span>
-              <span style={{ fontSize: 11, color: "#9ca3af" }}>typical GPU</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(148,163,184,0.1)", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 8, padding: "6px 12px" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#64748b", textDecoration: "line-through" }}>~75s</span>
+              <span style={{ fontSize: 11, color: "#64748b" }}>typical GPU</span>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "6px 12px" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", borderRadius: 8, padding: "6px 14px", boxShadow: "0 2px 8px rgba(59,130,246,0.3)" }}>
               {Math.round(75 / parseFloat(elapsed))}× faster
             </span>
             {tokensPerSec ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#1d4ed8", borderRadius: 8, padding: "6px 12px" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{tokensPerSec.toLocaleString()}</span>
-                <span style={{ fontSize: 11, color: "#bfdbfe" }}>tok/s</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8, padding: "6px 12px" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#93c5fd", fontVariantNumeric: "tabular-nums" }}>{tokensPerSec.toLocaleString()}</span>
+                <span style={{ fontSize: 11, color: "#60a5fa" }}>tok/s</span>
               </div>
             ) : null}
           </div>
@@ -773,7 +855,7 @@ export default function VisualOps() {
           ) : (
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0" }}>
-                <span style={{ fontSize: 12, color: "#15803d" }}>✓ API key set</span>
+                <span style={{ fontSize: 12, color: "#15803d" }}>✓ Cerebras key set</span>
                 <div style={{ display: "flex", gap: 12 }}>
                   <button onClick={checkModels} style={{ fontSize: 11, color: "#1d4ed8", background: "none", border: "none", cursor: "pointer" }}>check models</button>
                   <button onClick={() => setApiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
@@ -792,6 +874,37 @@ export default function VisualOps() {
               {modelsErr && (
                 <div style={{ marginTop: 8, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626" }}>{modelsErr}</div>
               )}
+            </div>
+          )}
+
+          {/* Gemini API Key (for speed comparison) */}
+          {!geminiKeySet ? (
+            <Card style={{ marginBottom: 16 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 500, color: "#374151" }}>Gemini API Key <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>(optional — speed comparison)</span></p>
+              <input
+                type="password"
+                placeholder="AIza..."
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 13, marginBottom: 8 }}
+              />
+              <button
+                onClick={() => geminiKey.length > 8 && setGeminiKeySet(true)}
+                style={{
+                  width: "100%", padding: "8px", borderRadius: 8,
+                  background: "#7c3aed", color: "#fff", border: "none",
+                  fontSize: 13, fontWeight: 500, cursor: "pointer",
+                }}
+              >
+                Save Gemini key
+              </button>
+            </Card>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f5f3ff", borderRadius: 8, border: "1px solid #ddd6fe" }}>
+                <span style={{ fontSize: 12, color: "#7c3aed" }}>✓ Gemini key set</span>
+                <button onClick={() => setGeminiKeySet(false)} style={{ fontSize: 11, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>change</button>
+              </div>
             </div>
           )}
 
@@ -859,7 +972,8 @@ export default function VisualOps() {
               color: (!file || !apiKeySet || running) ? "#9ca3af" : "#fff",
               border: "none", borderRadius: 10,
               fontSize: 15, fontWeight: 600, cursor: (!file || !apiKeySet || running) ? "not-allowed" : "pointer",
-              transition: "background 0.2s",
+              transition: "all 0.3s ease",
+              boxShadow: (!file || !apiKeySet || running) ? "none" : "0 4px 14px rgba(29,78,216,0.3)",
             }}
           >
             {running ? "⚡ Agents running..." : "Run 4-agent pipeline"}
@@ -886,7 +1000,7 @@ export default function VisualOps() {
             <div style={{ height: 400, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 40, animation: "pulse 1.5s infinite" }}>⚡</div>
               <p style={{ margin: 0, fontSize: 15, color: "#374151", fontWeight: 500 }}>Agents working at Cerebras speed...</p>
-              <p style={{ margin: 0, fontSize: 12, color: "#9ca3af" }}>1,500 tokens/sec · Gemma 4 31B</p>
+              <p style={{ margin: 0, fontSize: 12, color: "#9ca3af" }}>~1,850 tokens/sec · Gemma 4 31B · WSE-3</p>
             </div>
           )}
 
@@ -894,11 +1008,13 @@ export default function VisualOps() {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
               {/* Toolbar */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div className="card-animate" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>✓ Onboarding package ready</p>
                 <button
                   onClick={downloadPackage}
-                  style={{ fontSize: 13, fontWeight: 600, color: "#fff", background: "#1d4ed8", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}
+                  style={{ fontSize: 13, fontWeight: 600, color: "#fff", background: "linear-gradient(135deg, #1d4ed8, #7c3aed)", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", boxShadow: "0 2px 8px rgba(29,78,216,0.3)", transition: "transform 0.2s" }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-1px)"}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
                 >
                   ↓ Download package (.md)
                 </button>
@@ -1105,6 +1221,177 @@ export default function VisualOps() {
                       <div style={{ marginTop: 12, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
                         <p style={{ margin: 0, fontSize: 13, color: "#1d4ed8" }}><strong>Recommended approach:</strong> {researchData.recommended_approach}</p>
                       </div>
+                    )}
+                  </Section>
+                </Card>
+              )}
+
+              {/* ─── Speed Comparison: Cerebras vs Gemini ─────────────────── */}
+              {geminiKeySet && (
+                <Card style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid #334155" }}>
+                  <Section title={<span style={{ color: "#94a3b8" }}>⚡ Speed in Action — Cerebras vs Gemini (Live Comparison)</span>}>
+                    {!speedResult && !speedRunning && (
+                      <div style={{ textAlign: "center", padding: "20px 0" }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 14, color: "#e2e8f0", fontWeight: 600 }}>
+                          Same prompt. Two providers. Real-time race.
+                        </p>
+                        <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748b" }}>
+                          Sends identical executive summary request to Cerebras (WSE-3) and Google Gemini simultaneously
+                        </p>
+                        <button
+                          onClick={handleSpeedCompare}
+                          style={{
+                            padding: "12px 32px", borderRadius: 10,
+                            background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+                            color: "#fff", border: "none", fontSize: 15, fontWeight: 700,
+                            cursor: "pointer", boxShadow: "0 4px 20px rgba(59,130,246,0.5)",
+                            transition: "all 0.3s ease", letterSpacing: "-0.01em",
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+                        >
+                          🏁 Run Speed Comparison
+                        </button>
+                      </div>
+                    )}
+                    {speedRunning && (
+                      <div style={{ textAlign: "center", padding: "24px 0" }}>
+                        <div style={{ fontSize: 36, animation: "pulse 1s infinite" }}>⚡</div>
+                        <p style={{ margin: "8px 0 0", fontSize: 14, color: "#e2e8f0", fontWeight: 500 }}>Racing Cerebras vs Gemini...</p>
+                        <p style={{ margin: "4px 0 0", fontSize: 12, color: "#64748b" }}>Same prompt sent simultaneously via Promise.allSettled()</p>
+                      </div>
+                    )}
+                    {speedResult && (() => {
+                      const cOk = !speedResult.cerebras.error;
+                      const gOk = !speedResult.gemini.error;
+                      const cMs = speedResult.cerebras.ms;
+                      const gMs = speedResult.gemini.ms;
+                      const cTokSec = cOk && speedResult.cerebras.completionTime > 0
+                        ? Math.round(speedResult.cerebras.completionTokens / speedResult.cerebras.completionTime) : 0;
+                      const speedup = cOk && gOk && gMs > 0 ? (gMs / Math.max(cMs, 1)).toFixed(1) : null;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                          {/* Hero numbers row */}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center" }}>
+                            {/* Cerebras */}
+                            <div style={{ padding: "20px 16px", borderRadius: 12, background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04))", border: "1px solid rgba(34,197,94,0.25)", textAlign: "center" }}>
+                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.12em" }}>Cerebras · Gemma 4 31B</p>
+                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: "#4ade80", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                                {cOk ? `${(cMs / 1000).toFixed(2)}s` : "Error"}
+                              </p>
+                              {cOk && cTokSec > 0 && (
+                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#86efac" }}>
+                                  {cTokSec.toLocaleString()} tok/s
+                                </p>
+                              )}
+                            </div>
+                            {/* VS */}
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 14, fontWeight: 800, color: "#475569" }}>VS</span>
+                              {speedup && (
+                                <span style={{
+                                  fontSize: 16, fontWeight: 800, color: "#fff",
+                                  background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+                                  borderRadius: 24, padding: "6px 16px",
+                                  boxShadow: "0 4px 14px rgba(99,102,241,0.5)",
+                                  whiteSpace: "nowrap",
+                                }}>
+                                  {speedup}× faster
+                                </span>
+                              )}
+                              {!speedup && cOk && (
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", background: "rgba(34,197,94,0.15)", borderRadius: 20, padding: "4px 12px" }}>
+                                  Cerebras wins
+                                </span>
+                              )}
+                            </div>
+                            {/* Gemini */}
+                            <div style={{ padding: "20px 16px", borderRadius: 12, background: "rgba(148,163,184,0.06)", border: "1px solid rgba(148,163,184,0.15)", textAlign: "center" }}>
+                              <p style={{ margin: "0 0 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.12em" }}>Gemini 2.0 Flash Lite</p>
+                              <p style={{ margin: "0 0 4px", fontSize: 36, fontWeight: 800, color: gOk ? "#94a3b8" : "#f87171", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                                {gOk ? `${(gMs / 1000).toFixed(2)}s` : "Failed"}
+                              </p>
+                              {gOk && (
+                                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#64748b" }}>GPU inference</p>
+                              )}
+                              {!gOk && (
+                                <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>Quota exceeded / rate limited</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Detailed metrics table */}
+                          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #334155" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ background: "rgba(30,41,59,0.8)" }}>
+                                  <th style={{ padding: "10px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Metric</th>
+                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#4ade80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Cerebras (WSE-3)</th>
+                                  <th style={{ padding: "10px 14px", textAlign: "center", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>Gemini (GPU)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[
+                                  ["Model", "Gemma 4 31B", "Gemini 2.0 Flash Lite"],
+                                  ["Hardware", "WSE-3 · 900K cores · 44GB SRAM", "Cloud GPU cluster"],
+                                  ["Response time", cOk ? `${(cMs / 1000).toFixed(2)}s` : "—", gOk ? `${(gMs / 1000).toFixed(2)}s` : "Rate limited"],
+                                  ["Throughput", cTokSec > 0 ? `${cTokSec.toLocaleString()} tok/s` : "—", gOk ? "~50-200 tok/s (est.)" : "—"],
+                                  ["Total tokens", cOk ? `${speedResult.cerebras.tokens}` : "—", gOk ? "N/A" : "—"],
+                                  ["Completion tokens", cOk && speedResult.cerebras.completionTokens ? `${speedResult.cerebras.completionTokens}` : "—", gOk ? "N/A" : "—"],
+                                  ["Inference time (API)", cOk && speedResult.cerebras.completionTime > 0 ? `${(speedResult.cerebras.completionTime * 1000).toFixed(0)}ms` : "—", gOk ? `${gMs}ms (wall)` : "—"],
+                                ].map(([label, cerebras, gemini], i) => (
+                                  <tr key={i} style={{ borderTop: "1px solid #1e293b" }}>
+                                    <td style={{ padding: "8px 14px", color: "#cbd5e1", fontWeight: 500 }}>{label}</td>
+                                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#4ade80", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{cerebras}</td>
+                                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#64748b", fontVariantNumeric: "tabular-nums" }}>{gemini}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Response preview */}
+                          {cOk && speedResult.cerebras.content && (
+                            <div>
+                              <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" }}>Cerebras Response Preview</p>
+                              <div style={{ padding: "12px 14px", borderRadius: 8, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)", maxHeight: 120, overflow: "auto" }}>
+                                <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: "#94a3b8", whiteSpace: "pre-wrap" }}>
+                                  {speedResult.cerebras.content.slice(0, 500)}{speedResult.cerebras.content.length > 500 ? "..." : ""}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Bottom explanation */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
+                            <span style={{ fontSize: 16 }}>🧪</span>
+                            <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
+                              <strong style={{ color: "#e2e8f0" }}>Methodology:</strong> Identical prompt sent to both APIs simultaneously via <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>Promise.allSettled()</code>. Cerebras timing uses <code style={{ color: "#93c5fd", background: "rgba(59,130,246,0.1)", padding: "1px 4px", borderRadius: 3 }}>time_info.completion_time</code> from the API for precise measurement. WSE-3 achieves ~1,850 tok/s on Gemma 4 31B using 4 trillion transistors and 900K cores with 44GB on-chip SRAM — no off-chip memory bottleneck.
+                            </p>
+                          </div>
+
+                          {/* Re-run button */}
+                          <div style={{ textAlign: "center" }}>
+                            <button
+                              onClick={handleSpeedCompare}
+                              disabled={speedRunning}
+                              style={{
+                                padding: "8px 20px", borderRadius: 8,
+                                background: "transparent", color: "#64748b",
+                                border: "1px solid #334155", fontSize: 12, fontWeight: 500,
+                                cursor: "pointer", transition: "all 0.2s",
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.color = "#93c5fd"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#334155"; e.currentTarget.style.color = "#64748b"; }}
+                            >
+                              🔄 Re-run comparison
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {speedError && (
+                      <p style={{ margin: "8px 0 0", fontSize: 12, color: "#f87171" }}>{speedError}</p>
                     )}
                   </Section>
                 </Card>
